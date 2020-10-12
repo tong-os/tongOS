@@ -1,0 +1,11 @@
+[package]
+name = "tongOS"
+version = "0.10.1"
+authors = ["tarberd <bernardo.mferrari@gmail.com>"]
+edition = "2018"
+
+[profile.dev]
+opt-level = 0
+lto = false
+
+[dependencies]
