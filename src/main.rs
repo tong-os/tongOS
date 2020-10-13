@@ -2,7 +2,7 @@
 #![no_std]
 #![feature(
     panic_info_message,
-    llvm_asm,
+    asm,
     global_asm,
     allocator_api,
     alloc_error_handler,
@@ -44,7 +44,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 extern "C" fn abort() -> ! {
     loop {
         unsafe {
-            llvm_asm!("wfi"::::"volatile");
+            asm!("wfi");
         }
     }
 }

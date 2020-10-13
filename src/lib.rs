@@ -1,4 +1,6 @@
 #![no_std]
+#![feature(asm)]
+#![feature(global_asm)]
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
 
@@ -34,3 +36,4 @@ macro_rules! println {
 
 pub mod assignment;
 pub mod uart;
+pub mod trap;

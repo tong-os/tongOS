@@ -112,7 +112,7 @@ SECTIONS
       things in "special" text sections, so we match any we might come across here.
     */
 
-    *(.text.tongos.init) *(.text .text.*)
+    *(.text.tongos.init) *(.text.tongs.trap) *(.text .text.*)
 
     /*
       Again, with PROVIDE, we're providing a readable symbol called _text_end, which is
