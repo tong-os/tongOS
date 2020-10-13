@@ -1,3 +1,4 @@
+use tong_os::{assingment};
 extern "C" {
     static BSS_START: usize;
     static BSS_END: usize;
@@ -45,6 +46,8 @@ extern "C" fn kinit(_hartid: usize) -> ! {
         "                 __/ | \n",
         "                |___/ ",
     ));
-
+    println!("Init tests!"); 
+    assignment::print_sections();
+    assignment::test_bss();
     loop {}
 }

@@ -13,6 +13,7 @@
 #![test_runner(crate::test_runner)]
 
 #[macro_export]
+// SM
 macro_rules! print {
     ($($args:tt)+) => {{
         let mut uart = $crate::uart::Uart::new(0x1000_0000);
@@ -22,6 +23,7 @@ macro_rules! print {
 }
 
 #[macro_export]
+// SM
 macro_rules! println {
     () => {{
         print!("\r\n")
@@ -46,6 +48,7 @@ fn test_runner(tests: &[&dyn Fn()]) {
 extern "C" fn eh_personality() {}
 
 #[panic_handler]
+// SM
 fn panic(info: &core::panic::PanicInfo) -> ! {
     print!("Aborting: ");
     if let Some(p) = info.location() {
@@ -62,6 +65,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 }
 
 #[no_mangle]
+// SM
 extern "C" fn abort() -> ! {
     loop {
         unsafe {
