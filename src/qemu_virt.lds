@@ -2,19 +2,14 @@
  virt.lds
  Linker script for outputting to RISC-V QEMU "virt" machine.
  Stephen Marz
- 6 October 2019
+ tongOS team
 */
 
 
 OUTPUT_ARCH( "riscv" )
 
-/* We're setting our entry point to a symbol
-  called _start which is inside of boot.S. This
-  essentially stores the address of _start as the
-  "entry point", or where CPU instructions should start
-  executing.
-
-  In the rest of this script, we are going to place _start
+/*
+  Set entry point to _tongos_entry (look at entry.S)
   right at the beginning of 0x8000_0000 because this is where
   the virtual machine and many RISC-V boards will start executing.
 */
