@@ -1,4 +1,6 @@
-use tong_os::{assingment};
+use tong_os::assignment;
+use tong_os::{print, println};
+
 extern "C" {
     static BSS_START: usize;
     static BSS_END: usize;
