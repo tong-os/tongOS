@@ -12,29 +12,7 @@
 )]
 #![test_runner(crate::test_runner)]
 
-#[macro_export]
-// SM
-macro_rules! print {
-    ($($args:tt)+) => {{
-        let mut uart = $crate::uart::Uart::new(0x1000_0000);
-        use core::fmt::Write;
-        let _ = write!(uart, $($args)+);
-    }};
-}
-
-#[macro_export]
-// SM
-macro_rules! println {
-    () => {{
-        print!("\r\n")
-    }};
-    ($fmt:expr) => {{
-        print!(concat!($fmt, "\r\n"))
-    }};
-    ($fmt:expr, $($args:tt)+) => {{
-        print!(concat!($fmt, "\r\n"), $($args)+)
-    }};
-}
+use tong_os::{print, println};
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
@@ -46,9 +24,7 @@ fn test_runner(tests: &[&dyn Fn()]) {
 
 #[lang = "eh_personality"]
 extern "C" fn eh_personality() {}
-
 #[panic_handler]
-// SM
 fn panic(info: &core::panic::PanicInfo) -> ! {
     print!("Aborting: ");
     if let Some(p) = info.location() {
@@ -65,7 +41,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 }
 
 #[no_mangle]
-// SM
 extern "C" fn abort() -> ! {
     loop {
         unsafe {
@@ -74,6 +49,5 @@ extern "C" fn abort() -> ! {
     }
 }
 
-mod kinit;
 mod assembly;
-mod uart;
+mod kinit;
