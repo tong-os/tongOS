@@ -27,7 +27,7 @@ extern "C" {
 }
 
 extern "C" {
-    static mtvec_clint_vector_table: usize;
+    fn mtvec_clint_vector_table() -> !;
 }
 
 unsafe fn setup_hart() {
@@ -74,8 +74,9 @@ extern "C" fn kinit(hartid: usize) -> ! {
         assignment::test_bss();
         unsafe {
             setup_hart();
-            println!("sending software interrupt to hart 2");
-            software_interrupt(2);
+            let target_hart = 2;
+            println!("sending software interrupt to hart {}", target_hart);
+            software_interrupt(target_hart);
         }
     } else {
         unsafe {

@@ -2,7 +2,6 @@ global_asm!(include_str!("trap.S"));
 
 #[no_mangle]
 extern "C" fn trap_handler() {
-    println!("hit");
     let hartid: usize;
     unsafe {
         asm!("csrr {}, mhartid", out(reg) hartid);
@@ -14,31 +13,40 @@ extern "C" fn trap_handler() {
     }
     println!(
         "interrupt {} on hart {} cause {}",
-        cause >> 63 & 1,
+        if cause >> 63 & 1 == 1 { "async" } else { "sync"},
         hartid,
         cause & 0xfff
     );
 
-    loop {}
+    let mut mepc: usize;
+    unsafe {
+        asm!("csrr {}, mepc", out(reg) mepc);
+    };
+
+    mepc += 4;
+
+    unsafe {
+        asm!("csrw mepc, {}", in(reg) mepc);
+    };
+
+    unsafe {
+        asm!("mret");
+    };
 }
 
 #[no_mangle]
 extern "C" fn machine_software_interrupt() {
-    println!("hit");
     let hartid: usize;
     unsafe {
         asm!("csrr {}, mhartid", out(reg) hartid);
     }
 
-    let cause: usize;
-    unsafe {
-        asm!("csrr {}, mcause", out(reg) cause);
-    }
     println!(
-        "software interrupt on hart {} cause {}",
-        hartid,
-        cause & 0xfff
+        "handling software interrupt on hart {}",
+        hartid
     );
 
-    loop {}
+    unsafe {
+        asm!("mret");
+    };
 }

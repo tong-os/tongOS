@@ -12,8 +12,7 @@ set_global_pointer:
 .option pop
 
 set_early_trap_vector:
-    la t0, mtvec_clint_vector_table
-    addi t0, t0, 1
+    la t0, early_trap_vector
     csrw mtvec, t0
 
 set_stack_pointer:
@@ -30,8 +29,6 @@ set_hart_stack_pointer:
 
 call_kinit:
     csrr a0, mhartid
-    li a1, 0
-    li a2, 0
     call kinit
 
 return_from_kinit_is_error:
