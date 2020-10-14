@@ -18,24 +18,11 @@ extern "C" fn trap_handler() {
         cause & 0xfff
     );
 
-    let mut mepc: usize;
-    unsafe {
-        asm!("csrr {}, mepc", out(reg) mepc);
-    };
-
-    mepc += 4;
-
-    unsafe {
-        asm!("csrw mepc, {}", in(reg) mepc);
-    };
-
-    unsafe {
-        asm!("mret");
-    };
+    loop {};
 }
 
 #[no_mangle]
-extern "C" fn machine_software_interrupt() {
+pub extern "C" fn machine_software_interrupt() {
     let hartid: usize;
     unsafe {
         asm!("csrr {}, mhartid", out(reg) hartid);
@@ -46,7 +33,5 @@ extern "C" fn machine_software_interrupt() {
         hartid
     );
 
-    unsafe {
-        asm!("mret");
-    };
+    loop {};
 }

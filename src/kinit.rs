@@ -74,9 +74,13 @@ extern "C" fn kinit(hartid: usize) -> ! {
         assignment::test_bss();
         unsafe {
             setup_hart();
-            let target_hart = 2;
-            println!("sending software interrupt to hart {}", target_hart);
+            let target_hart = 1;
+            println!(
+                "sending software interrupt to hart {} from hart {}",
+                target_hart, hartid
+            );
             software_interrupt(target_hart);
+            println!("done");
         }
     } else {
         unsafe {
@@ -86,5 +90,6 @@ extern "C" fn kinit(hartid: usize) -> ! {
             }
         }
     }
+
     loop {}
 }
