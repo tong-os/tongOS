@@ -17,6 +17,7 @@ set_early_trap_vector:
 
 set_stack_pointer:
     la sp, _stack_end
+
 partition_stack_between_harts:
     csrr a0, mhartid
     li t0, 0
