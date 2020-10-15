@@ -1,30 +1,6 @@
+use tong_os::assembly::*;
 use tong_os::assignment;
 use tong_os::{print, println};
-
-extern "C" {
-    static BSS_START: usize;
-    static BSS_END: usize;
-    #[allow(dead_code)]
-    static HEAP_START: usize;
-    #[allow(dead_code)]
-    static HEAP_SIZE: usize;
-    #[allow(dead_code)]
-    static TEXT_START: usize;
-    #[allow(dead_code)]
-    static TEXT_END: usize;
-    #[allow(dead_code)]
-    static DATA_START: usize;
-    #[allow(dead_code)]
-    static DATA_END: usize;
-    #[allow(dead_code)]
-    static RODATA_START: usize;
-    #[allow(dead_code)]
-    static RODATA_END: usize;
-    #[allow(dead_code)]
-    static KERNEL_STACK_START: usize;
-    #[allow(dead_code)]
-    static KERNEL_STACK_END: usize;
-}
 
 #[no_mangle]
 extern "C" fn kinit(_hartid: usize) -> ! {
@@ -35,6 +11,12 @@ extern "C" fn kinit(_hartid: usize) -> ! {
             (address as *mut usize).write_volatile(0);
         }
     }
+    println!("Finished!");
+
+    assignment::test_bss();
+
+    println!("Init pages");
+    tong_os::page::init();
     println!("Finished!");
 
     println!("You are now in ...");
@@ -48,8 +30,8 @@ extern "C" fn kinit(_hartid: usize) -> ! {
         "                 __/ | \n",
         "                |___/ ",
     ));
-    println!("Init tests!"); 
+    println!("Init tests!");
     assignment::print_sections();
-    assignment::test_bss();
+
     loop {}
 }

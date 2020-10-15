@@ -1,17 +1,4 @@
-extern "C" {
-    static BSS_START: usize;
-    static BSS_END: usize;
-    static HEAP_START: usize;
-    static HEAP_SIZE: usize;
-    static TEXT_START: usize;
-    static TEXT_END: usize;
-    static DATA_START: usize;
-    static DATA_END: usize;
-    static RODATA_START: usize;
-    static RODATA_END: usize;
-    static KERNEL_STACK_START: usize;
-    static KERNEL_STACK_END: usize;
-}
+use crate::assembly::*;
 
 pub fn test_bss() {
     print!("Checking BSS ...  ");
@@ -24,7 +11,7 @@ pub fn test_bss() {
             }
             non_zeroes_count += 1;
             println!(
-                "BSS section contains non-zero value at address: 0x{:x}. Value={}",
+                "BSS section contains non-zero value at address: 0x{:x?}. Value={:x?}",
                 address, content
             );
         }
