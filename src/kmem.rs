@@ -4,7 +4,6 @@
 // tongOS team
 
 use crate::page;
-use core::{mem::size_of, ptr::null_mut};
 
 static mut KMEM_ALLOC: usize = 0;
 static mut KMEM_HEAD: *mut KernelPageDescriptor = core::ptr::null_mut();
@@ -26,23 +25,28 @@ impl KernelPageDescriptor {
     }
 
     pub fn is_taken(&self) -> bool {
-        self.flags_size & KernelPageDescriptorFlags::Taken as usize != 0
+        self.flags_size & KernelPageDescriptorFlags::Taken as usize
+            == KernelPageDescriptorFlags::Taken as usize
     }
 
-    pub fn clear(&mut self) {
-        self.flags_size = 0;
+    pub fn set_taken(&mut self) {
+        self.flags_size |= KernelPageDescriptorFlags::Taken as usize;
     }
 
-    pub fn set_flag(&mut self, flag: KernelPageDescriptorFlags) {
-        self.flags_size |= flag as usize;
+    pub fn set_free(&mut self) {
+        self.flags_size &= !(KernelPageDescriptorFlags::Taken as usize);
     }
 
-    pub fn set_size(&mut self, sz: usize) {
-        self.flags_size = sz & !(KernelPageDescriptorFlags::Taken as usize);
-        if self.is_taken() {
+    pub fn set_size(&mut self, size: usize) {
+        let is_taken = self.is_taken();
+
+        self.flags_size = size & !(KernelPageDescriptorFlags::Taken as usize);
+
+        if is_taken {
             self.flags_size |= KernelPageDescriptorFlags::Taken as usize
         }
     }
+
     pub fn get_size(&self) -> usize {
         self.flags_size & !(KernelPageDescriptorFlags::Taken as usize)
     }
@@ -62,34 +66,32 @@ pub fn init() {
 
         KMEM_HEAD = k_alloc as *mut KernelPageDescriptor;
 
-        KMEM_HEAD.write_volatile(KernelPageDescriptor::new(KMEM_ALLOC * page::PAGE_SIZE))
+        (*KMEM_HEAD).set_size(KMEM_ALLOC * page::PAGE_SIZE);
+        (*KMEM_HEAD).set_free();
     }
 }
 
-// Allocate sub-page level allocation based on bytes
+/// Allocate sub-page level allocation based on bytes
 pub fn kmalloc(size: usize) -> *mut u8 {
     unsafe {
-        let size = page::align_address(size, 3) * core::mem::size_of::<KernelPageDescriptor>();
-
+        let size = page::align_address(size, 3) + core::mem::size_of::<KernelPageDescriptor>();
         let mut head = KMEM_HEAD;
-
+        // .add() uses pointer arithmetic, so we type-cast into a u8
+        // so that we multiply by an absolute size (KMEM_ALLOC *
+        // PAGE_SIZE).
         let tail =
             (KMEM_HEAD as *mut u8).add(KMEM_ALLOC * page::PAGE_SIZE) as *mut KernelPageDescriptor;
 
         while head < tail {
-            // Check if is free and new size <= current size
             if !(*head).is_taken() && size <= (*head).get_size() {
                 let chunk_size = (*head).get_size();
-                let remaining_space = chunk_size - size;
-                // Set taken bit
-                (*head).set_flag(KernelPageDescriptorFlags::Taken);
-                // Alloc whole size if possible.
-                // Otherwise, only remaining space available.
-                if remaining_space > size_of::<KernelPageDescriptor>() {
+                let rem = chunk_size - size;
+                (*head).set_taken();
+                if rem > core::mem::size_of::<KernelPageDescriptor>() {
                     let next = (head as *mut u8).add(size) as *mut KernelPageDescriptor;
                     // There is space remaining here.
-                    (*next).clear();
-                    (*next).set_size(remaining_space);
+                    (*next).set_free();
+                    (*next).set_size(rem);
                     (*head).set_size(size);
                 } else {
                     // If we get here, take the entire chunk
@@ -103,14 +105,15 @@ pub fn kmalloc(size: usize) -> *mut u8 {
             }
         }
     }
-
+    // If we get here, we didn't find any free chunks--i.e. there isn't
+    // enough memory for this. TODO: Add on-demand page allocation.
     core::ptr::null_mut()
 }
 
 // Allocate sub-page level allocation based on bytes and zero the memory
 pub fn kzmalloc(sz: usize) -> *mut u8 {
     let size = page::align_address(sz, 3);
-    let ret = kmalloc(size) as *mut u64;
+    let ret = kmalloc(size);
 
     if !ret.is_null() {
         for i in 0..size {
@@ -119,23 +122,109 @@ pub fn kzmalloc(sz: usize) -> *mut u8 {
             }
         }
     }
-    ret as *mut u8
+    ret
+}
+
+pub fn kfree(ptr: *mut u8) {
+    unsafe {
+        if !ptr.is_null() {
+            let descriptor = (ptr as *mut KernelPageDescriptor).offset(-1);
+            if (*descriptor).is_taken() {
+                (*descriptor).set_free()
+            }
+
+            coalesce();
+        }
+    }
+}
+
+/// Merge smaller chunks into a bigger chunk
+pub fn coalesce() {
+    unsafe {
+        let mut head = KMEM_HEAD;
+        let tail =
+            (KMEM_HEAD as *mut u8).add(KMEM_ALLOC * page::PAGE_SIZE) as *mut KernelPageDescriptor;
+
+        while head < tail {
+            let next = (head as *mut u8).add((*head).get_size()) as *mut KernelPageDescriptor;
+            if (*head).get_size() == 0 {
+                // If this happens, then we have a bad heap
+                // (double free or something). However, that
+                // will cause an infinite loop since the next
+                // pointer will never move beyond the current
+                // location.
+                break;
+            } else if next >= tail {
+                // We calculated the next by using the size
+                // given as get_size(), however this could push
+                // us past the tail. In that case, the size is
+                // wrong, hence we break and stop doing what we
+                // need to do.
+                break;
+            } else if !(*head).is_taken() && !(*next).is_taken() {
+                // This means we have adjacent blocks needing to
+                // be freed. So, we combine them into one
+                // allocation.
+                (*head).set_size((*head).get_size() + (*next).get_size());
+            }
+            // If we get here, we might've moved. Recalculate new
+            // head.
+            head = (head as *mut u8).add((*head).get_size()) as *mut KernelPageDescriptor;
+        }
+    }
 }
 
 pub fn print_table() {
-	unsafe {
-		let mut head = KMEM_HEAD;
-		let tail = (KMEM_HEAD as *mut u8).add(KMEM_ALLOC * page::PAGE_SIZE)
-		           as *mut KernelPageDescriptor;
-		while head < tail {
-			println!(
-			         "{:p}: Length = {:<10} Taken = {}",
-			         head,
-			         (*head).get_size(),
-			         (*head).is_taken()
-			);
-			head = (head as *mut u8).add((*head).get_size())
-			       as *mut KernelPageDescriptor;
-		}
-	}
+    unsafe {
+        let mut head = KMEM_HEAD;
+        let tail =
+            (KMEM_HEAD as *mut u8).add(KMEM_ALLOC * page::PAGE_SIZE) as *mut KernelPageDescriptor;
+
+        while head < tail {
+            println!(
+                "{:p}: Length = {:<10} Taken = {}",
+                head,
+                (*head).get_size(),
+                (*head).is_taken()
+            );
+            head = (head as *mut u8).add((*head).get_size()) as *mut KernelPageDescriptor;
+        }
+    }
+}
+
+use core::alloc::{GlobalAlloc, Layout};
+
+struct OsGlobalAlloc;
+
+unsafe impl GlobalAlloc for OsGlobalAlloc {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // We align to the next page size so that when
+        // we divide by PAGE_SIZE, we get exactly the number
+        // of pages necessary.
+        kzmalloc(layout.size())
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+        // We ignore layout since our allocator uses ptr_start -> last
+        // to determine the span of an allocation.
+        kfree(ptr);
+    }
+}
+
+/// Technically, we don't need the {} at the end, but it
+/// reveals that we're creating a new structure and not just
+/// copying a value.
+#[global_allocator]
+static GA: OsGlobalAlloc = OsGlobalAlloc {};
+
+#[alloc_error_handler]
+/// If for some reason alloc() in the global allocator gets null_mut(),
+/// then we come here. This is a divergent function, so we call panic to
+/// let the tester know what's going on.
+pub fn alloc_error(l: Layout) -> ! {
+    panic!(
+        "Allocator failed to allocate {} bytes with {}-byte alignment.",
+        l.size(),
+        l.align()
+    );
 }
