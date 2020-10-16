@@ -25,9 +25,8 @@ pub const fn align_address(address: usize, order: usize) -> usize {
 
 #[repr(u8)]
 pub enum PageDescriptorFlags {
-    Empty = 0b0,
-    Taken = 0b1,
-    Last = 0b10,
+    Taken = 1 << 0,
+    Last = 1 << 1,
 }
 
 pub struct PageDescriptor {
@@ -36,17 +35,15 @@ pub struct PageDescriptor {
 
 impl PageDescriptor {
     pub fn new() -> Self {
-        PageDescriptor {
-            flags: PageDescriptorFlags::Empty as u8,
-        }
+        PageDescriptor { flags: 0 }
     }
 
     pub fn is_taken(&self) -> bool {
-        self.flags & PageDescriptorFlags::Taken as u8 == 1
+        self.flags & PageDescriptorFlags::Taken as u8 == PageDescriptorFlags::Taken as u8
     }
 
     pub fn is_last(&self) -> bool {
-        self.flags & PageDescriptorFlags::Last as u8 == 1
+        self.flags & PageDescriptorFlags::Last as u8 == PageDescriptorFlags::Last as u8
     }
 
     pub fn clear(&mut self) {
@@ -61,7 +58,6 @@ impl PageDescriptor {
 // Represent (repr) our entry bits as
 // unsigned 64-bit integers.
 #[repr(usize)]
-#[derive(Copy, Clone)]
 pub enum PageTableEntryFlags {
     None = 0,
     Valid = 1 << 0,
@@ -84,7 +80,7 @@ pub enum PageTableEntryFlags {
     UserReadWriteExecute = 1 << 1 | 1 << 2 | 1 << 3 | 1 << 4,
 }
 
-struct Sv39PageTableEntry {
+pub struct Sv39PageTableEntry {
     pub entry: usize,
 }
 
@@ -104,40 +100,92 @@ impl Sv39PageTableEntry {
     pub fn is_executable(&self) -> bool {
         self.entry & PageTableEntryFlags::Execute as usize == PageTableEntryFlags::Execute as usize
     }
+
+    pub fn get_physical_address(&self) -> usize {
+        (self.entry & !0x3ff) << 2
+    }
+
+    pub fn is_leaf(&self) -> bool {
+        self.is_readable() || self.is_writable()
+    }
 }
 
 // 2^9 = 512 entries per table
-struct Sv39PageTable {
+pub struct Sv39PageTable {
     pub entries: [Sv39PageTableEntry; 512],
 }
 
 impl Sv39PageTable {
-    // pub fn map(&self, virtual_address: usize, physical_address: usize, flags: usize) {
-    //     //  Sv39 spec
-    //     let levels = 3;
-    //     let PTESIZE = 8;
+    pub fn levels() -> usize {
+        3
+    }
+    // Map a virtual address to a physical address using 4096-byte page
+    // size.
+    pub fn map(
+        &mut self,
+        virtual_address: usize,
+        physical_address: usize,
+        flags: usize,
+        level: usize,
+    ) {
+        // Make sure that Read, Write, or Execute have been provided
+        // otherwise, we'll leak memory and always create a page fault.
+        assert!(flags & 0xe != 0);
 
-    //     // Make sure that Read, Write, or Execute have been provided
-    //     // otherwise, we'll leak memory and always create a page fault.
-    //     assert!(flags & 0xe != 0);
+        // Sv39 virtual address (9 bits each)
+        let virtual_page_number = [
+            (virtual_address >> 12) & 0x1ff,
+            (virtual_address >> 21) & 0x1ff,
+            (virtual_address >> 30) & 0x1ff,
+        ];
+        //  Sv39 physical address
+        let physical_page_number = [
+            (physical_address >> 12) & 0x1ff,
+            (physical_address >> 21) & 0x1ff,
+            (physical_address >> 30) & 0x1ff,
+        ];
 
-    //     // Sv39 virtual address (9 bits each)
-    //     let virtual_page_number = [
-    //         (virtual_address >> 12) & 0x1ff,
-    //         (virtual_address >> 21) & 0x1ff,
-    //         (virtual_address >> 30) & 0x1ff,
-    //     ];
-    //     //  Sv39 physical address
-    //     let physical_page_number = [
-    //         (physical_address >> 12) & 0x1ff,
-    //         (physical_address >> 21) & 0x1ff,
-    //         (physical_address >> 30) & 0x1ff,
-    //     ];
+        let mut page_table_entry = &mut self.entries[virtual_page_number[2]];
 
-    //     let mut page_entry = self.entries[virtual_page_number[2]];
+        for i in (level..Sv39PageTable::levels() - 1).rev() {
+            // If it's not valid, you can use it
+            if !page_table_entry.is_valid() {
+                let page = zalloc(1);
+                // The page is stored in the entry shifted right by 2 places.
+                page_table_entry.entry = (page as usize >> 2) | PageTableEntryFlags::Valid as usize;
+            }
 
-    //     for i in (0..levels - 1).rev() {}
-    // }
+            let entry_as_table = page_table_entry.get_physical_address() as *mut Sv39PageTable;
+            page_table_entry = unsafe { &mut (*entry_as_table).entries[virtual_page_number[i]] };
+        }
+        // VPN[0]
+        // Create new page table entry.
+        // Reserved | PPN[2] | PPN[1] | PPN[0] | RSW | FLAG_BITS
+        // PPN[2] = [53:28], PPN[1] = [27:19], PPN[0] = [18:10]
+        page_table_entry.entry = (physical_page_number[2] << 28)
+            | (physical_page_number[1] << 19)
+            | (physical_page_number[0] << 10)
+            | flags
+            | PageTableEntryFlags::Valid as usize
+            | PageTableEntryFlags::Dirty as usize
+            | PageTableEntryFlags::Access as usize;
+    }
+
+    /// Unmaps and frees all memory associated with a table.    
+    pub fn unmap(&mut self) {
+        for entry in self.entries.iter_mut() {
+            // Check if entry is valid and is a branch
+            if entry.is_valid() && !entry.is_leaf() {
+                let table = entry.get_physical_address() as *mut Sv39PageTable;
+
+                unsafe {
+                    (*table).unmap();
+                }
+
+                dealloc(table as *mut u8);
+            }
+        }
+    }
 
     pub fn virtual_address_translation(&self, virtual_address: usize) -> Option<usize> {
         // Sv39 virtual address (9 bits each)
@@ -147,12 +195,11 @@ impl Sv39PageTable {
             (virtual_address >> 30) & 0x1ff,
         ];
 
-        let levels = 3;
-        //  let PTESIZE = 8; but we dont need it because index uses sizeof::<usize>()
         // a = satp.ppn * PAGE_SIZE, althou self points to a already
         // a + va.ppn[i] * PTESIZE
         let mut page_table_entry = &self.entries[virtual_page_number[2]];
-        for i in (0..=(levels - 1)).rev() {
+
+        for i in (0..=(Sv39PageTable::levels() - 1)).rev() {
             // pte.v = 0 OR (pte.r = 0 AND pte.w = 1)
             if !page_table_entry.is_valid()
                 || (!page_table_entry.is_readable() && page_table_entry.is_writable())
@@ -162,14 +209,14 @@ impl Sv39PageTable {
             }
 
             // pte.r = 1 OR pte.x = 1
-            if page_table_entry.is_readable() || page_table_entry.is_executable() {
+            if page_table_entry.is_leaf() {
                 // Leaf found
                 // Masks PPN[i]. Starts at #12, each one with 9 bits
                 let offset_mask = (1 << (12 + i * 9)) - 1;
                 // pa.pgoff = vaa.pgoff
                 let vaddr_pgoff = virtual_address & offset_mask;
 
-                // Skip checking for superpage because we will not support superpages
+                // maybe do see how the ISA checks for supper pages
 
                 // pa.ppn[]
                 let addr = ((page_table_entry.entry << 2) as usize) & !offset_mask;
@@ -177,10 +224,9 @@ impl Sv39PageTable {
                 return Some(addr | vaddr_pgoff);
             }
 
-            let entry_as_table = ((page_table_entry.entry & !0x3ff) << 2) as *const Sv39PageTable;
+            let entry_as_table = page_table_entry.get_physical_address() as *const Sv39PageTable;
 
-            page_table_entry =
-                unsafe { &entry_as_table.as_ref().unwrap().entries[virtual_page_number[i - 1]] };
+            page_table_entry = unsafe { &(*entry_as_table).entries[virtual_page_number[i - 1]] };
         }
 
         None
@@ -291,4 +337,66 @@ pub fn dealloc(ptr: *mut u8) {
         // we are on the last page.
         (*p).clear();
     }
+}
+
+
+/// Print all page allocations
+/// This is mainly used for debugging.
+pub fn print_page_allocations() {
+	unsafe {
+		let num_pages = (HEAP_SIZE - (PAGE_TABLE_START_ADDRESS - HEAP_START)) / PAGE_SIZE;
+		let mut beg = HEAP_START as *const PageDescriptor;
+		let end = beg.add(num_pages);
+		let alloc_beg = PAGE_TABLE_START_ADDRESS;
+		let alloc_end = PAGE_TABLE_START_ADDRESS + num_pages * PAGE_SIZE;
+		println!();
+		println!(
+		         "PAGE ALLOCATION TABLE\nMETA: {:p} -> {:p}\nPHYS: \
+		          0x{:x} -> 0x{:x}",
+		         beg, end, alloc_beg, alloc_end
+		);
+		println!("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+		let mut num = 0;
+		while beg < end {
+			if (*beg).is_taken() {
+				let start = beg as usize;
+				let memaddr = PAGE_TABLE_START_ADDRESS
+				              + (start - HEAP_START)
+				                * PAGE_SIZE;
+				print!("0x{:x} => ", memaddr);
+				loop {
+                    num += 1;
+					if (*beg).is_last() {
+                        let end = beg as usize;
+						let memaddr = PAGE_TABLE_START_ADDRESS
+						              + (end
+						                 - HEAP_START)
+						                * PAGE_SIZE
+                                      + PAGE_SIZE - 1;
+						print!(
+						       "0x{:x}: {:>3} page(s)",
+						       memaddr,
+						       (end - start + 1)
+						);
+						println!(".");
+						break;
+					}
+					beg = beg.add(1);
+				}
+			}
+			beg = beg.add(1);
+		}
+		println!("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+		println!(
+		         "Allocated: {:>6} pages ({:>10} bytes).",
+		         num,
+		         num * PAGE_SIZE
+		);
+		println!(
+		         "Free     : {:>6} pages ({:>10} bytes).",
+		         num_pages - num,
+		         (num_pages - num) * PAGE_SIZE
+		);
+		println!();
+	}
 }
