@@ -62,7 +62,7 @@ impl PageDescriptor {
 // unsigned 64-bit integers.
 #[repr(usize)]
 #[derive(Copy, Clone)]
-pub enum PageTableEntryBits {
+pub enum PageTableEntryFlags {
     None = 0,
     Valid = 1 << 0,
     Read = 1 << 1,
@@ -88,11 +88,103 @@ struct Sv39PageTableEntry {
     pub entry: usize,
 }
 
-impl Sv39PageTableEntry {}
+impl Sv39PageTableEntry {
+    pub fn is_valid(&self) -> bool {
+        self.entry & PageTableEntryFlags::Valid as usize == PageTableEntryFlags::Valid as usize
+    }
+
+    pub fn is_readable(&self) -> bool {
+        self.entry & PageTableEntryFlags::Read as usize == PageTableEntryFlags::Read as usize
+    }
+
+    pub fn is_writable(&self) -> bool {
+        self.entry & PageTableEntryFlags::Write as usize == PageTableEntryFlags::Write as usize
+    }
+
+    pub fn is_executable(&self) -> bool {
+        self.entry & PageTableEntryFlags::Execute as usize == PageTableEntryFlags::Execute as usize
+    }
+}
 
 // 2^9 = 512 entries per table
 struct Sv39PageTable {
     pub entries: [Sv39PageTableEntry; 512],
+}
+
+impl Sv39PageTable {
+    // pub fn map(&self, virtual_address: usize, physical_address: usize, flags: usize) {
+    //     //  Sv39 spec
+    //     let levels = 3;
+    //     let PTESIZE = 8;
+
+    //     // Make sure that Read, Write, or Execute have been provided
+    //     // otherwise, we'll leak memory and always create a page fault.
+    //     assert!(flags & 0xe != 0);
+
+    //     // Sv39 virtual address (9 bits each)
+    //     let virtual_page_number = [
+    //         (virtual_address >> 12) & 0x1ff,
+    //         (virtual_address >> 21) & 0x1ff,
+    //         (virtual_address >> 30) & 0x1ff,
+    //     ];
+    //     //  Sv39 physical address
+    //     let physical_page_number = [
+    //         (physical_address >> 12) & 0x1ff,
+    //         (physical_address >> 21) & 0x1ff,
+    //         (physical_address >> 30) & 0x1ff,
+    //     ];
+
+    //     let mut page_entry = self.entries[virtual_page_number[2]];
+
+    //     for i in (0..levels - 1).rev() {}
+    // }
+
+    pub fn virtual_address_translation(&self, virtual_address: usize) -> Option<usize> {
+        // Sv39 virtual address (9 bits each)
+        let virtual_page_number = [
+            (virtual_address >> 12) & 0x1ff,
+            (virtual_address >> 21) & 0x1ff,
+            (virtual_address >> 30) & 0x1ff,
+        ];
+
+        let levels = 3;
+        //  let PTESIZE = 8; but we dont need it because index uses sizeof::<usize>()
+        // a = satp.ppn * PAGE_SIZE, althou self points to a already
+        // a + va.ppn[i] * PTESIZE
+        let mut page_table_entry = &self.entries[virtual_page_number[2]];
+        for i in (0..=(levels - 1)).rev() {
+            // pte.v = 0 OR (pte.r = 0 AND pte.w = 1)
+            if !page_table_entry.is_valid()
+                || (!page_table_entry.is_readable() && page_table_entry.is_writable())
+            {
+                // Page fault
+                return None;
+            }
+
+            // pte.r = 1 OR pte.x = 1
+            if page_table_entry.is_readable() || page_table_entry.is_executable() {
+                // Leaf found
+                // Masks PPN[i]. Starts at #12, each one with 9 bits
+                let offset_mask = (1 << (12 + i * 9)) - 1;
+                // pa.pgoff = vaa.pgoff
+                let vaddr_pgoff = virtual_address & offset_mask;
+
+                // Skip checking for superpage because we will not support superpages
+
+                // pa.ppn[]
+                let addr = ((page_table_entry.entry << 2) as usize) & !offset_mask;
+
+                return Some(addr | vaddr_pgoff);
+            }
+
+            let entry_as_table = ((page_table_entry.entry & !0x3ff) << 2) as *const Sv39PageTable;
+
+            page_table_entry =
+                unsafe { &entry_as_table.as_ref().unwrap().entries[virtual_page_number[i - 1]] };
+        }
+
+        None
+    }
 }
 
 // Alloc 1 page strucutre per 4k bytes
@@ -174,8 +266,6 @@ pub fn zalloc(pages: usize) -> *mut u8 {
 }
 
 /// Deallocate a page by its pointer
-/// The way we've structured this, it will automatically coalesce
-/// contiguous pages.
 pub fn dealloc(ptr: *mut u8) {
     // Make sure we don't try to free a null pointer.
     assert!(!ptr.is_null());
@@ -185,9 +275,7 @@ pub fn dealloc(ptr: *mut u8) {
         // calculate here is the page structure, not the HEAP address!
         assert!(address >= HEAP_START && address < PAGE_TABLE_START_ADDRESS);
         let mut p = address as *mut PageDescriptor;
-        // println!("PTR in is {:p}, addr is 0x{:x}", ptr, addr);
         assert!((*p).is_taken(), "Freeing a non-taken page?");
-        // Keep clearing pages until we hit the last page.
         while (*p).is_taken() && !(*p).is_last() {
             (*p).clear();
             p = p.add(1);
