@@ -35,5 +35,6 @@ macro_rules! println {
 
 pub mod assembly;
 pub mod assignment;
+pub mod kmem;
 pub mod page;
 pub mod uart;

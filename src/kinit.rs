@@ -12,11 +12,15 @@ extern "C" fn kinit(_hartid: usize) -> ! {
         }
     }
     println!("Finished!");
-
+    println!("Init tests!");
+    assignment::print_sections();
     assignment::test_bss();
 
     println!("Init pages");
     tong_os::page::init();
+    tong_os::kmem::init();
+    tong_os::kmem::print_table();
+    tong_os::page::print_page_allocations();
     println!("Finished!");
 
     println!("You are now in ...");
@@ -30,8 +34,7 @@ extern "C" fn kinit(_hartid: usize) -> ! {
         "                 __/ | \n",
         "                |___/ ",
     ));
-    println!("Init tests!");
-    assignment::print_sections();
+    
 
     loop {}
 }
