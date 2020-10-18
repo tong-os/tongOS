@@ -1,5 +1,7 @@
 #![no_std]
+#![feature(allocator_api)]
 #![feature(global_asm)]
+#![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
 
@@ -35,5 +37,6 @@ macro_rules! println {
 
 pub mod assembly;
 pub mod assignment;
+pub mod kmem;
 pub mod page;
 pub mod uart;
