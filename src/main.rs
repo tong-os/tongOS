@@ -14,7 +14,6 @@
 
 use tong_os::{print, println};
 
-
 #[macro_use]
 extern crate alloc;
 
@@ -59,6 +58,12 @@ extern "C" fn abort() -> ! {
 use tong_os::assembly::*;
 use tong_os::assignment;
 
+fn init() {
+    println!("YEAH, we're running as user with virtual address translation!");
+
+    loop {}
+}
+
 #[no_mangle]
 extern "C" fn kinit(_hartid: usize) -> ! {
     tong_os::uart::Uart::new(0x1000_0000).init();
@@ -95,6 +100,10 @@ extern "C" fn kinit(_hartid: usize) -> ! {
         "                |___/ ",
     ));
 
+    println!("Before init: {:x?}", init as usize);
+    let process = tong_os::process::Process::new(init);
+    println!("after init");
 
-    loop {}
+    println!("Before swtich");
+    tong_os::process::switch_to_user(&process.context);
 }
