@@ -116,9 +116,14 @@ pub struct Sv39PageTable {
 }
 
 impl Sv39PageTable {
-    pub fn levels() -> usize {
+    pub const fn levels() -> usize {
         3
     }
+
+    pub const fn mode() -> usize {
+        8
+    }
+
     // Map a virtual address to a physical address using 4096-byte page
     // size.
     pub fn map(
@@ -147,7 +152,7 @@ impl Sv39PageTable {
 
         let mut page_table_entry = &mut self.entries[virtual_page_number[2]];
 
-        for i in (level..Sv39PageTable::levels() - 1).rev() {
+        for i in (level..(Sv39PageTable::levels() - 1)).rev() {
             // If it's not valid, you can use it
             if !page_table_entry.is_valid() {
                 let page = zalloc(1);
@@ -391,4 +396,3 @@ pub fn print_page_allocations() {
         println!();
     }
 }
-
