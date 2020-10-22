@@ -99,7 +99,6 @@ impl Drop for Process {
         page::dealloc(self.stack);
         unsafe { (*self.page_table).unmap() }
         page::dealloc(self.page_table as *mut u8);
-        panic!("droping process");
     }
 }
 
@@ -123,7 +122,6 @@ pub fn process_list_add(process: Process) {
 
 pub fn process_list_remove(pid: usize) {
     if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
-
         if let Some(position) = process_list.iter().position(|process| process.pid == pid) {
             process_list.remove(position);
         }
@@ -145,5 +143,16 @@ pub fn switch_to_user(process: &Process) -> ! {
             process.context.pc,
             process.context.satp,
         );
+    }
+}
+
+pub fn print_process_list() {
+    if let Some(process_list) = unsafe { PROCESS_LIST.take() } {
+        for process in &process_list {
+            println!("Pid: {}", process.pid);
+        }
+        unsafe {
+            PROCESS_LIST.replace(process_list);
+        }
     }
 }
