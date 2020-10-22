@@ -139,7 +139,7 @@ pub fn kfree(ptr: *mut u8) {
 }
 
 /// Merge smaller chunks into a bigger chunk
-pub fn coalesce() {
+fn coalesce() {
     unsafe {
         let mut head = KMEM_HEAD;
         let tail =

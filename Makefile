@@ -22,3 +22,6 @@ endif
 
 clean: umount
 	rm -f hdd.dsk
+
+debug: 
+	riscv64-elf-gdb -ex "target remote localhost:1234" --symbols=target/riscv64gc-unknown-none-elf/debug/tong_os

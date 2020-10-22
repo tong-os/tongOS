@@ -3,26 +3,40 @@
 // Stephen Marz
 // tongOS team
 
-use crate::cpu::{self, TrapFrame};
-use crate::page::{self, PageTableEntryFlags, Sv39PageTable};
+use crate::{
+    assembly,
+    cpu::{self, TrapFrame},
+    page::{self, PageTableEntryFlags, Sv39PageTable},
+};
 
+use alloc::collections::vec_deque::VecDeque;
+
+pub static mut RRUNNING: Option<Process> = None;
+pub static mut PROCESS_LIST: Option<VecDeque<Process>> = None;
+pub static mut NEXT_PID: usize = 0;
+pub static DEFAULT_QUANTUM: usize = 666;
 // Process States
 // Tanenbaum, Modern Operating Systems
 // Ready -> Running = picked by scheduler
 // Running -> Ready = scheduler picks another process
 // Running -> Blocked = blocked for input
 // Blocked -> Ready = input available now
+#[derive(Debug, Clone, Copy)]
 pub enum ProcessState {
     Ready,
     Running,
     Blocked,
 }
 
+#[derive(Debug, Clone)]
+#[repr(C)]
 pub struct Process {
     pub context: TrapFrame,
     pub stack: *mut u8,
     pub state: ProcessState,
     pub page_table: *mut Sv39PageTable,
+    pub quantum: usize,
+    pub pid: usize,
 }
 
 impl Process {
@@ -31,21 +45,25 @@ impl Process {
         context.pc = start as usize;
         context.mode = cpu::CpuMode::Machine as usize;
 
-        let page_table_address = crate::page::zalloc(1);
+        let pid = unsafe {
+            NEXT_PID += 1;
+            NEXT_PID
+        };
 
-        context.satp = crate::cpu::build_satp(1, page_table_address as usize);
+        let page_table_address = page::zalloc(1);
 
-        let stack = crate::page::zalloc(1) as usize;
+        context.satp = cpu::build_satp(pid, page_table_address as usize);
 
-        context.regs[crate::cpu::GeneralPurposeRegister::Sp as usize] =
-            stack + crate::page::PAGE_SIZE;
+        let stack = page::zalloc(1) as usize;
+
+        context.regs[cpu::GeneralPurposeRegister::Sp as usize] = stack + page::PAGE_SIZE;
 
         let page_table = page_table_address as *mut Sv39PageTable;
 
         unsafe {
             (*page_table).map(
-                stack + crate::page::PAGE_SIZE,
-                stack + crate::page::PAGE_SIZE,
+                stack + page::PAGE_SIZE,
+                stack + page::PAGE_SIZE,
                 PageTableEntryFlags::UserReadWriteExecute as usize,
                 0,
             );
@@ -55,7 +73,7 @@ impl Process {
                 PageTableEntryFlags::UserReadWrite as usize,
                 0,
             );
-            for address in (crate::assembly::TEXT_START..crate::assembly::TEXT_END).step_by(1000) {
+            for address in (assembly::TEXT_START..assembly::TEXT_END).step_by(1000) {
                 (*page_table).map(
                     address as usize,
                     address as usize,
@@ -70,16 +88,62 @@ impl Process {
             stack: stack as *mut u8,
             state: ProcessState::Ready,
             page_table,
+            quantum: DEFAULT_QUANTUM,
+            pid,
         }
     }
 }
 
-pub fn switch_to_user(trap_frame: &TrapFrame) -> ! {
+impl Drop for Process {
+    fn drop(&mut self) {
+        page::dealloc(self.stack);
+        unsafe { (*self.page_table).unmap() }
+        page::dealloc(self.page_table as *mut u8);
+        panic!("droping process");
+    }
+}
+
+pub fn process_list_add(process: Process) {
+    if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
+        process_list.push_back(process);
+
+        unsafe {
+            PROCESS_LIST.replace(process_list);
+        }
+    } else {
+        let mut process_list = VecDeque::new();
+
+        process_list.push_back(process);
+
+        unsafe {
+            PROCESS_LIST.replace(process_list);
+        }
+    }
+}
+
+pub fn process_list_remove(pid: usize) {
+    if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
+
+        if let Some(position) = process_list.iter().position(|process| process.pid == pid) {
+            process_list.remove(position);
+        }
+
+        unsafe {
+            PROCESS_LIST.replace(process_list);
+        }
+    }
+}
+
+pub fn exit() {
+    unsafe { asm!("ECALL") };
+}
+
+pub fn switch_to_user(process: &Process) -> ! {
     unsafe {
-        println!(
-            "pc {:x?} sattp: {:x?},  pc: {:x?}",
-            trap_frame.pc, trap_frame.satp, trap_frame.regs[2]
+        crate::assembly::__tong_os_switch_to_user(
+            &process.context,
+            process.context.pc,
+            process.context.satp,
         );
-        crate::assembly::__tong_os_switch_to_user(trap_frame, trap_frame.pc, trap_frame.satp);
     }
 }
