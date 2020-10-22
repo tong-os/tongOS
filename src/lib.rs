@@ -1,10 +1,16 @@
 #![no_std]
 #![feature(allocator_api)]
+#![feature(alloc_prelude)]
 #![feature(global_asm)]
 #![feature(asm)]
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
+
+#[macro_use]
+extern crate alloc;
+
+use alloc::prelude::v1::*;
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
@@ -38,8 +44,10 @@ macro_rules! println {
 
 pub mod assembly;
 pub mod assignment;
+pub mod cpu;
 pub mod kmem;
 pub mod page;
 pub mod process;
+pub mod scheduler;
+pub mod trap;
 pub mod uart;
-pub mod cpu;

@@ -25,12 +25,22 @@
     fld f\i, ((NUM_GP_REGS+(\i))*REG_SIZE)(\basereg)
 .endm
 
+.global __tong_os_trap
+__tong_os_trap:
+    # Read trap frame
+    csrrw a0, mscratch, a0
+
+    la sp, _stack_end
+
+    call tong_os_trap
+
+
 .global __tong_os_switch_to_user
 __tong_os_switch_to_user:
     # a0 = trapFrame
     # a1 = pc
     # a2 = satp
-    csrw    mscratch, a0
+    csrw   mscratch, a0
 
     # Load program counter
     ld    a1, 65*8(a0)

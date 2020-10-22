@@ -86,15 +86,13 @@ pub enum FloatingPointRegister {
 // context switch handling.
 // To make offsets easier, everything will be a usize (8 bytes)
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct TrapFrame {
     pub regs: [usize; 32],  // 0 - 255
     pub fregs: [usize; 32], // 256 - 511
     pub satp: usize,        // 512 - 519
     pub pc: usize,          // 520
     pub hartid: usize,      // 528
-    pub quantum: usize,     // 536
-    pub pid: usize,         // 544
     pub mode: usize,        // 552
 }
 
@@ -106,8 +104,6 @@ impl TrapFrame {
             satp: 0,
             pc: 0,
             hartid: 0,
-            quantum: 1,
-            pid: 0,
             mode: 0,
         }
     }
@@ -119,24 +115,3 @@ pub const fn build_satp(asid: usize, addr: usize) -> usize {
         | (asid & 0xffff) << 44
         | (addr >> 12) & 0xff_ffff_ffff
 }
-
-
-// pub fn satp_write(val: usize) {
-// 	unsafe {
-// 		asm!("csrw satp, {}", in(reg) val);
-// 	}
-// }
-
-// pub fn satp_read() -> usize {
-// 	unsafe {
-// 		let rval;
-// 		asm!("csrr $0, satp" :"=r"(rval));
-// 		rval
-// 	}
-// }
-
-// pub fn mscratch_write(val: usize) {
-// 	unsafe {
-// 		llvm_asm!("csrw	mscratch, $0" ::"r"(val));
-// 	}
-// }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }/ }
