@@ -58,11 +58,18 @@ extern "C" fn abort() -> ! {
 use tong_os::assembly::*;
 use tong_os::assignment;
 
-fn exemple_process() -> () {
+fn example_process1() -> () {
     println!("YEAH, we're running as user with virtual address translation!");
 
-    // println!("exiting process");
-    // tong_os::process::exit();
+    println!("exiting process");
+    tong_os::process::exit();
+}
+
+fn example_process2() -> () {
+    println!("EXAMPLE 2, ARE YOU READY??");
+
+    println!("exiting process");
+    tong_os::process::exit();
 }
 
 #[no_mangle]
@@ -87,6 +94,9 @@ extern "C" fn kinit(_hartid: usize) -> ! {
     let x = vec![0, 1, 2, 3];
     tong_os::kmem::print_table();
 
+    println!("setup trap");
+    tong_os::trap::init();
+
     println!("Finished!");
 
     println!("You are now in ...");
@@ -101,27 +111,23 @@ extern "C" fn kinit(_hartid: usize) -> ! {
         "                |___/ ",
     ));
 
-    let process = tong_os::process::Process::new(exemple_process);
+    let process = tong_os::process::Process::new(example_process1);
     let ptr: *const _ = &process;
 
-    println!("{:#x?}", process);
-    println!("{:x?}", ptr);
+    // println!("{:#x?}", process);
+    // println!("{:x?}", ptr);
 
-    // println!("add process to list!");
-    // unsafe {
-    //     println!("process_list = {:#?}", tong_os::process::PROCESS_LIST);
-    // }
-    // tong_os::process::process_list_add(process);
+    println!("add process to list!");
+    tong_os::process::process_list_add(process);
 
-    // unsafe {
-    //     println!("process_list = {:#?}", tong_os::process::PROCESS_LIST);
-    // }
+    let process = tong_os::process::Process::new(example_process2);
+    tong_os::process::process_list_add(process);
 
-    // println!("scheduling!");
-    // // if let Some(next_process) = tong_os::scheduler::schedule() {
+    println!("scheduling!");
+    if let Some(next_process) = tong_os::scheduler::schedule() {
         println!("switching to user ...");
-        tong_os::process::switch_to_user(&process);
-    // }
+        tong_os::process::switch_to_user(&next_process);
+    }
 
     println!("rip");
 

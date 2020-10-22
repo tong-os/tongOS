@@ -26,6 +26,7 @@
 .endm
 
 .global __tong_os_trap
+.align 4
 __tong_os_trap:
     # Read trap frame
     csrrw a0, mscratch, a0
@@ -47,7 +48,7 @@ __tong_os_switch_to_user:
     # Load satp
     ld    a2, 64*8(a0)
     # Load processor mode
-    ld    a3, 69*8(a0)
+    ld    a3, 67*8(a0)
     # Pid
     # ld    a4, 544(a0)
 
