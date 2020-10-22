@@ -4,7 +4,7 @@ global_asm!(include_str!("trap.S"));
 
 extern "C" {
     pub fn __tong_os_switch_to_user(trap_frame: &crate::cpu::TrapFrame, pc: usize, satp: usize) -> !;
-    pub fn __tong_os_trap();
+    pub fn __tong_os_trap() -> !;
 }
 
 extern "C" {
