@@ -6,7 +6,7 @@
 use crate::assembly::{HEAP_SIZE, HEAP_START};
 
 // Page size = 4096 bytes
-const PAGE_ORDER: usize = 12;
+pub const PAGE_ORDER: usize = 12;
 pub const PAGE_SIZE: usize = 1 << PAGE_ORDER;
 
 pub static mut NUMBER_OF_PAGES: usize = 0;

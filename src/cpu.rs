@@ -6,9 +6,9 @@
 
 #[repr(usize)]
 pub enum CpuMode {
-    User = 0,
-    Supervisor = 1,
-    Machine = 3,
+    User = 0b00,
+    Supervisor = 0b01,
+    Machine = 0b11,
 }
 
 #[repr(usize)]
@@ -88,12 +88,12 @@ pub enum FloatingPointRegister {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct TrapFrame {
-    pub regs: [usize; 32],  // 0 - 255
-    pub fregs: [usize; 32], // 256 - 511
-    pub satp: usize,        // 512 - 519
-    pub pc: usize,          // 520
-    pub hartid: usize,      // 528
-    pub mode: usize,        // 552
+    pub regs: [usize; 32],
+    pub fregs: [usize; 32],
+    pub satp: usize,
+    pub pc: usize,
+    pub hartid: usize,
+    pub mode: usize,
 }
 
 impl TrapFrame {
@@ -110,8 +110,12 @@ impl TrapFrame {
 }
 // SATP = MODE |  ASID  |  PPN
 //      [63:60]|[59:44] | [43:0]
-pub const fn build_satp(asid: usize, addr: usize) -> usize {
-    (crate::page::Sv39PageTable::mode() as usize) << 60
-        | (asid & 0xffff) << 44
-        | (addr >> 12) & 0xff_ffff_ffff
+pub const fn build_satp(asid: usize, pysical_address: usize) -> usize {
+    use crate::page;
+    let mode = (page::Sv39PageTable::mode() as usize) << 60;
+    let asid = (asid & 0xffff) << 44;
+    let ppn_mask = (1 << 44) - 1;
+    let pysical_page_number = pysical_address >> page::PAGE_ORDER & ppn_mask;
+
+    mode | asid | pysical_page_number
 }

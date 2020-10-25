@@ -1,9 +1,10 @@
-use crate::process::Process;
+use crate::process::{self, Process};
 use crate::scheduler::schedule;
 
 pub fn init() {
+    use crate::assembly::__tong_os_trap;
     unsafe {
-        asm!("csrw mtvec, {}", in(reg) (crate::assembly::__tong_os_trap as usize));
+        asm!("csrw mtvec, {}", in(reg) (__tong_os_trap as usize));
     }
 }
 
@@ -14,6 +15,7 @@ pub fn tong_os_trap(process: &Process) {
         asm!("csrr {}, mcause", out(reg) mcause);
     }
     println!("In tongo_os_trap!");
+
     // Get interrupt bit from mcause
     let is_async = mcause >> 63 & 1 == 1;
     // Get interrupt cause
@@ -32,21 +34,25 @@ pub fn tong_os_trap(process: &Process) {
         match cause {
             8 | 9 | 11 => {
                 println!("Handling exception 8 to process#{}", process.pid);
-                crate::process::print_process_list();
-                crate::process::process_list_remove(process.pid);
+                process::print_process_list();
+                process::process_list_remove(process.pid);
                 println!("Process list after remove: ");
-                crate::process::print_process_list();
+                process::print_process_list();
 
                 if let Some(next_process) = schedule() {
-                    crate::process::switch_to_user(&next_process);
+                    process::switch_to_user(&next_process);
                 } else {
                     panic!("Next process not found!");
                 }
             }
-            _ => {
+            cause => {
+                let mtval: usize;
+                unsafe {
+                    asm!("csrr {}, mtval", out(reg) mtval);
+                }
                 panic!(
-                    "Unhandled sync trap CPU#{} -> {}\n",
-                    process.context.hartid, cause
+                    "Unhandled sync trap CPU#{} -> cause: {}; mval: {:x?}\n",
+                    process.context.hartid, cause, mtval
                 );
             }
         }
