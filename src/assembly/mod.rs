@@ -2,8 +2,10 @@ global_asm!(include_str!("entry.S"));
 global_asm!(include_str!("memory.S"));
 global_asm!(include_str!("trap.S"));
 
+use crate::process::Process;
+
 extern "C" {
-    pub fn __tong_os_switch_to_user(trap_frame: &crate::cpu::TrapFrame, pc: usize, satp: usize) -> !;
+    pub fn __tong_os_switch_to_user(trap_frame: &Process) -> !;
     pub fn __tong_os_trap() -> !;
 }
 

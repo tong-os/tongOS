@@ -91,7 +91,7 @@ extern "C" fn kinit(_hartid: usize) -> ! {
     tong_os::page::print_page_allocations();
     tong_os::kmem::init();
     tong_os::kmem::print_table();
-    let x = vec![0, 1, 2, 3];
+    let _ = vec![0, 1, 2, 3];
     tong_os::kmem::print_table();
 
     println!("setup trap");

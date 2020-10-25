@@ -3,7 +3,7 @@
 // Stephen Marz
 // tongOs team
 
-use crate::process::{self, Process, ProcessState, print_process_list};
+use crate::process::{self, print_process_list, Process, ProcessState};
 
 // next_process = schedule()
 // switch_context(current_process, next_process)
@@ -13,19 +13,23 @@ pub fn schedule() -> &'static Option<Process> {
     print_process_list();
     unsafe {
         if let Some(mut process_list) = process::PROCESS_LIST.take() {
-            // Shift list to left
-            process_list.rotate_left(1);
-            // Get first process
-            if let Some(first) = process_list.pop_front() {
-                match first.state {
-                    ProcessState::Ready => {
-                        process::RRUNNING.replace(first);
+            loop {
+                // Shift list to left
+                process_list.rotate_left(1);
+                // Get first process
+                if let Some(p) = process_list.front() {
+                    match p.state {
+                        ProcessState::Ready => {
+                            let mut first = process_list.pop_front().unwrap();
+                            first.state = ProcessState::Running;
+                            process::PROCESS_RUNNING.replace(first);
 
-                        process::PROCESS_LIST.replace(process_list);
-                        return &process::RRUNNING;
+                            process::PROCESS_LIST.replace(process_list);
+                            return &process::PROCESS_RUNNING;
+                        }
+                        ProcessState::Running => {}
+                        ProcessState::Blocked => {}
                     }
-                    ProcessState::Running => {}
-                    ProcessState::Blocked => {}
                 }
             }
         }
