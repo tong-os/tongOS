@@ -3,15 +3,13 @@
 // Stephen Marz
 // tongOS team
 
-use crate::{
-    assembly,
-    cpu::{self, TrapFrame},
-    page::{self, PageTableEntryFlags, Sv39PageTable},
-};
+use crate::assembly;
+use crate::cpu::{self, CpuMode, TrapFrame};
+use crate::page::{self, PageTableEntryFlags, Sv39PageTable};
 
 use alloc::collections::vec_deque::VecDeque;
 
-pub static mut RRUNNING: Option<Process> = None;
+pub static mut PROCESS_RUNNING: Option<Process> = None;
 pub static mut PROCESS_LIST: Option<VecDeque<Process>> = None;
 pub static mut NEXT_PID: usize = 0;
 pub static DEFAULT_QUANTUM: usize = 666;
@@ -43,7 +41,7 @@ impl Process {
     pub fn new(start: fn() -> ()) -> Self {
         let mut context = TrapFrame::new();
         context.pc = start as usize;
-        context.mode = cpu::CpuMode::Machine as usize;
+        context.mode = CpuMode::User as usize;
 
         let pid = unsafe {
             NEXT_PID += 1;
@@ -61,19 +59,23 @@ impl Process {
         let page_table = page_table_address as *mut Sv39PageTable;
 
         unsafe {
-            (*page_table).map(
-                stack + page::PAGE_SIZE,
-                stack + page::PAGE_SIZE,
-                PageTableEntryFlags::UserReadWriteExecute as usize,
-                0,
-            );
+            (*page_table).map(stack, stack, PageTableEntryFlags::UserReadWrite as usize, 0);
             (*page_table).map(
                 0x1000_0000,
                 0x1000_0000,
                 PageTableEntryFlags::UserReadWrite as usize,
                 0,
             );
-            for address in (assembly::TEXT_START..assembly::TEXT_END).step_by(1000) {
+            for address in (assembly::RODATA_START..assembly::RODATA_END).step_by(page::PAGE_SIZE)
+            {
+                (*page_table).map(
+                    address as usize,
+                    address as usize,
+                    PageTableEntryFlags::UserReadWrite as usize,
+                    0,
+                );
+            }
+            for address in (assembly::TEXT_START..assembly::TEXT_END).step_by(page::PAGE_SIZE) {
                 (*page_table).map(
                     address as usize,
                     address as usize,
@@ -137,13 +139,7 @@ pub fn exit() {
 }
 
 pub fn switch_to_user(process: &Process) -> ! {
-    unsafe {
-        crate::assembly::__tong_os_switch_to_user(
-            &process.context,
-            process.context.pc,
-            process.context.satp,
-        );
-    }
+    unsafe { assembly::__tong_os_switch_to_user(process) }
 }
 
 pub fn print_process_list() {
