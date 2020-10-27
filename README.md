@@ -7,7 +7,6 @@ Principal referência de implementação: Stephen Marz¹.
 ## Versão
 0.1
 
-## Como rodar
 
 ## Instalação
 ```
@@ -21,7 +20,7 @@ rustup target add riscv64gc-unknown-none-elf
 cargo install cargo-binutils
 ```
 
-### Sistema
+## Como rodar
 Para executar, mesmo após qualquer mudança, basta o seguinte comando: 
 ```
 cargo run
