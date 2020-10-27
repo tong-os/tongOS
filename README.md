@@ -38,11 +38,11 @@ Para a primeira entrega do projeto, é necessário cobrir os seguintes tópicos:
 
 ## Visualização
 Os testes para a primeira entrega estão apresentados no arquivo `main.rs`, chamados pela função `kinit()`.
-[1]: as seções inicializadas são impressas na tela, além de testar se o espaço de `bss` está todo zerado.
-[2]: a MMU é inicializada e testada a partir da impressão das alocações e tabelas de páginas. São realizadas algumas alocações para teste.
-[3]: o funcionamento da UART é conferido na totalidade dos outros testes, igualmente.
-[4]: 
-[5]: 
+1. as seções inicializadas são impressas na tela, além de testar se o espaço de `bss` está todo zerado.
+2. a MMU é inicializada e testada a partir da impressão das alocações e tabelas de páginas. São realizadas algumas alocações para teste.
+3. o funcionamento da UART é conferido na totalidade dos outros testes, igualmente.
+4. 
+5. 
 
 ## Referências
 
