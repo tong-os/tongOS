@@ -42,10 +42,12 @@ macro_rules! println {
     }};
 }
 
+pub mod app;
 pub mod assembly;
 pub mod assignment;
 pub mod cpu;
 pub mod kmem;
+pub mod lock;
 pub mod page;
 pub mod process;
 pub mod scheduler;

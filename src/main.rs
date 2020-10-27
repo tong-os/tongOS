@@ -58,8 +58,10 @@ extern "C" fn abort() -> ! {
 use tong_os::assembly::*;
 use tong_os::assignment;
 
-fn example_process1() -> () {
+
+fn example_process1(test: usize) -> () {
     println!("YEAH, we're running as user with virtual address translation!");
+    println!("Arg: {}", test);
 
     println!("exiting process");
     tong_os::process::exit();
@@ -111,16 +113,9 @@ extern "C" fn kinit(_hartid: usize) -> ! {
         "                |___/ ",
     ));
 
-    let process = tong_os::process::Process::new(example_process1);
-    let ptr: *const _ = &process;
-
-    // println!("{:#x?}", process);
-    // println!("{:x?}", ptr);
-
-    println!("add process to list!");
+    let process = tong_os::process::Process::new(example_process1 as usize, 666);
     tong_os::process::process_list_add(process);
-
-    let process = tong_os::process::Process::new(example_process2);
+    let process = tong_os::process::Process::new(example_process2 as usize, 0);
     tong_os::process::process_list_add(process);
 
     println!("scheduling!");
@@ -128,8 +123,6 @@ extern "C" fn kinit(_hartid: usize) -> ! {
         println!("switching to user ...");
         tong_os::process::switch_to_user(&next_process);
     }
-
-    println!("rip");
 
     loop {}
 }

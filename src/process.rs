@@ -19,6 +19,7 @@ pub static DEFAULT_QUANTUM: usize = 666;
 // Running -> Ready = scheduler picks another process
 // Running -> Blocked = blocked for input
 // Blocked -> Ready = input available now
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub enum ProcessState {
     Ready,
@@ -38,10 +39,12 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(start: fn() -> ()) -> Self {
+    pub fn new(start: usize, arg0: usize) -> Self {
         let mut context = TrapFrame::new();
         context.pc = start as usize;
         context.mode = CpuMode::User as usize;
+
+        context.regs[cpu::GeneralPurposeRegister::A0 as usize] = arg0;
 
         let pid = unsafe {
             NEXT_PID += 1;
@@ -66,8 +69,7 @@ impl Process {
                 PageTableEntryFlags::UserReadWrite as usize,
                 0,
             );
-            for address in (assembly::RODATA_START..assembly::RODATA_END).step_by(page::PAGE_SIZE)
-            {
+            for address in (assembly::RODATA_START..assembly::RODATA_END).step_by(page::PAGE_SIZE) {
                 (*page_table).map(
                     address as usize,
                     address as usize,
@@ -94,32 +96,31 @@ impl Process {
             pid,
         }
     }
+
+    pub fn join(&mut self) {
+        match unsafe { PROCESS_RUNNING.take() } {
+            Some(mut process) => {
+                let pid = process.pid;
+                process.state = ProcessState::Ready;
+                process_list_add(process);
+                match crate::scheduler::schedule() {
+                    Some(next) => {
+                        switch_to_user(next);
+                    }
+                    None => {
+                        panic!("Couldn't join! Process pid={}", pid);
+                    }
+                }
+            }
+            None => {
+                panic!("Join called but there is no running process!")
+            }
+        }
+    }
 }
 
 impl Drop for Process {
     fn drop(&mut self) {
-        page::dealloc(self.stack);
-        unsafe { (*self.page_table).unmap() }
-        page::dealloc(self.page_table as *mut u8);
-    }
-}
-
-pub fn process_list_add(process: Process) {
-    if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
-        process_list.push_back(process);
-
-        unsafe {
-            PROCESS_LIST.replace(process_list);
-        }
-    } else {
-        let mut process_list = VecDeque::new();
-
-        process_list.push_back(process);
-
-        unsafe {
-            PROCESS_LIST.replace(process_list);
-        }
-    }
 }
 
 pub fn process_list_remove(pid: usize) {
