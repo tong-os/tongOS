@@ -121,6 +121,28 @@ impl Process {
 
 impl Drop for Process {
     fn drop(&mut self) {
+        page::dealloc(self.stack);
+        unsafe { (*self.page_table).unmap() }
+        page::dealloc(self.page_table as *mut u8);
+    }
+}
+
+pub fn process_list_add(process: Process) {
+    if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
+        process_list.push_back(process);
+
+        unsafe {
+            PROCESS_LIST.replace(process_list);
+        }
+    } else {
+        let mut process_list = VecDeque::new();
+
+        process_list.push_back(process);
+
+        unsafe {
+            PROCESS_LIST.replace(process_list);
+        }
+    }
 }
 
 pub fn process_list_remove(pid: usize) {
