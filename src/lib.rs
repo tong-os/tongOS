@@ -3,6 +3,7 @@
 #![feature(alloc_prelude)]
 #![feature(global_asm)]
 #![feature(asm)]
+#![feature(llvm_asm)]
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
@@ -42,10 +43,12 @@ macro_rules! println {
     }};
 }
 
+pub mod app;
 pub mod assembly;
 pub mod assignment;
 pub mod cpu;
 pub mod kmem;
+pub mod lock;
 pub mod page;
 pub mod process;
 pub mod scheduler;

@@ -1,5 +1,6 @@
 use crate::process::{self, Process};
 use crate::scheduler::schedule;
+use alloc::boxed::Box;
 
 pub fn init() {
     use crate::assembly::__tong_os_trap;
@@ -9,7 +10,7 @@ pub fn init() {
 }
 
 #[no_mangle]
-pub fn tong_os_trap(process: &Process) {
+pub fn tong_os_trap(process: &mut Process) {
     let mcause: usize;
     unsafe {
         asm!("csrr {}, mcause", out(reg) mcause);
@@ -33,16 +34,34 @@ pub fn tong_os_trap(process: &Process) {
     } else {
         match cause {
             8 | 9 | 11 => {
-                println!("Handling exception 8 to process#{}", process.pid);
-                process::print_process_list();
-                process::process_list_remove(process.pid);
-                println!("Process list after remove: ");
-                process::print_process_list();
+                println!("Handling exception {} to process#{}", cause, process.pid);
+                // Check if child process needs to reschedule parent
+                if let Some(_ppid) = process.ppid {
+                    // Otherwise, normal scheduling
+                    println!("Scheduling father process");
+                    process::print_process_list();
 
-                if let Some(next_process) = schedule() {
-                    process::switch_to_user(&next_process);
+                    if let Some(next_process) = schedule() {
+                        println!("PPID={}", next_process.pid);
+                        unsafe {
+                            process::PROCESS_RUNNING.as_mut().unwrap().context.pc += 4;
+                        }
+                        process::switch_to_user(&next_process);
+                    } else {
+                        panic!("Next process not found!");
+                    }
+                }
+
+                // Check if process has a child to schedule
+                if let Some(child_proc) = process.schedule_child() {
+                    process::switch_to_user(&child_proc);
                 } else {
-                    panic!("Next process not found!");
+                    // Otherwise, normal scheduling
+                    if let Some(next_process) = schedule() {
+                        process::switch_to_user(&next_process);
+                    } else {
+                        panic!("Next process not found!");
+                    }
                 }
             }
             cause => {

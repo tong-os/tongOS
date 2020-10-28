@@ -80,6 +80,7 @@ pub enum PageTableEntryFlags {
     UserReadWriteExecute = 1 << 1 | 1 << 2 | 1 << 3 | 1 << 4,
 }
 
+#[repr(C)]
 pub struct Sv39PageTableEntry {
     pub entry: usize,
 }
@@ -111,6 +112,7 @@ impl Sv39PageTableEntry {
 }
 
 // 2^9 = 512 entries per table
+#[repr(C)]
 pub struct Sv39PageTable {
     pub entries: [Sv39PageTableEntry; 512],
 }
