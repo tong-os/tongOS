@@ -7,6 +7,7 @@ use crate::assembly;
 use crate::cpu::{self, CpuMode, TrapFrame};
 use crate::page::{self, PageTableEntryFlags, Sv39PageTable};
 
+use alloc::boxed::Box;
 use alloc::collections::vec_deque::VecDeque;
 
 pub static mut PROCESS_RUNNING: Option<Process> = None;
@@ -36,6 +37,7 @@ pub struct Process {
     pub page_table: *mut Sv39PageTable,
     pub quantum: usize,
     pub pid: usize,
+    pub ppid: Option<usize>,
 }
 
 impl Process {
@@ -55,14 +57,23 @@ impl Process {
 
         context.satp = cpu::build_satp(pid, page_table_address as usize);
 
-        let stack = page::zalloc(1) as usize;
+        let num_stack_pages = 8;
+        let stack = page::zalloc(num_stack_pages) as usize;
+        let stack_end = stack + num_stack_pages * page::PAGE_SIZE;
 
-        context.regs[cpu::GeneralPurposeRegister::Sp as usize] = stack + page::PAGE_SIZE;
+        context.regs[cpu::GeneralPurposeRegister::Sp as usize] = stack_end;
 
         let page_table = page_table_address as *mut Sv39PageTable;
 
         unsafe {
-            (*page_table).map(stack, stack, PageTableEntryFlags::UserReadWrite as usize, 0);
+            for address in (stack..stack_end).step_by(page::PAGE_SIZE) {
+                (*page_table).map(
+                    address,
+                    address,
+                    PageTableEntryFlags::UserReadWrite as usize,
+                    0,
+                );
+            }
             (*page_table).map(
                 0x1000_0000,
                 0x1000_0000,
@@ -70,6 +81,32 @@ impl Process {
                 0,
             );
             for address in (assembly::RODATA_START..assembly::RODATA_END).step_by(page::PAGE_SIZE) {
+                (*page_table).map(
+                    address as usize,
+                    address as usize,
+                    PageTableEntryFlags::UserReadWrite as usize,
+                    0,
+                );
+            }
+            for address in (assembly::DATA_START..assembly::DATA_END).step_by(page::PAGE_SIZE) {
+                (*page_table).map(
+                    address as usize,
+                    address as usize,
+                    PageTableEntryFlags::UserReadWrite as usize,
+                    0,
+                );
+            }
+            for address in (assembly::BSS_START..assembly::BSS_END).step_by(page::PAGE_SIZE) {
+                (*page_table).map(
+                    address as usize,
+                    address as usize,
+                    PageTableEntryFlags::UserReadWrite as usize,
+                    0,
+                );
+            }
+            for address in (assembly::HEAP_START..assembly::HEAP_START + assembly::HEAP_SIZE)
+                .step_by(page::PAGE_SIZE)
+            {
                 (*page_table).map(
                     address as usize,
                     address as usize,
@@ -94,36 +131,80 @@ impl Process {
             page_table,
             quantum: DEFAULT_QUANTUM,
             pid,
+            ppid: None,
         }
     }
 
-    pub fn join(&mut self) {
-        match unsafe { PROCESS_RUNNING.take() } {
-            Some(mut process) => {
-                let pid = process.pid;
-                process.state = ProcessState::Ready;
-                process_list_add(process);
-                match crate::scheduler::schedule() {
-                    Some(next) => {
-                        switch_to_user(next);
+    // If process has child, return it to reschedule
+    pub fn schedule_child(&self) -> &'static Option<Process> {
+        unsafe {
+            if let Some(mut process_list) = PROCESS_LIST.take() {
+                if let Some(p) = process_list.front() {
+                    match p.ppid {
+                        Some(pid) if pid == self.pid => {
+                            let mut first = process_list.pop_front().unwrap();
+                            first.state = ProcessState::Running;
+
+                            let mut running = PROCESS_RUNNING.take().unwrap();
+
+                            running.state = ProcessState::Ready;
+
+                            process_list.push_front(running);
+
+                            PROCESS_RUNNING.replace(first);
+
+                            PROCESS_LIST.replace(process_list);
+                            return &PROCESS_RUNNING;
+                        }
+                        Some(_) => (),
+                        None => (),
                     }
-                    None => {
-                        panic!("Couldn't join! Process pid={}", pid);
-                    }
+                } else {
+                    panic!("No more processes! Shutting down...")
                 }
-            }
-            None => {
-                panic!("Join called but there is no running process!")
+                PROCESS_LIST.replace(process_list);
             }
         }
+        &None
     }
 }
 
 impl Drop for Process {
     fn drop(&mut self) {
+        println!("drop pid: {}", self.pid);
         page::dealloc(self.stack);
         unsafe { (*self.page_table).unmap() }
         page::dealloc(self.page_table as *mut u8);
+    }
+}
+
+pub fn join(pid: usize) {
+    // Parent process called join
+    match unsafe { PROCESS_RUNNING.take() } {
+        Some(process) => {
+            let ppid = process.pid;
+            unsafe { PROCESS_RUNNING.replace(process) };
+
+            println!("running pid {} join pid {}", ppid, pid);
+
+            //set ppid of pid
+            set_ppid(pid, ppid);
+            exit();
+        }
+        None => panic!("Join called but there is no running process!"),
+    }
+}
+
+pub fn set_ppid(pid: usize, ppid: usize) {
+    if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
+        for process in &mut process_list {
+            if process.pid == pid {
+                process.ppid = Some(ppid);
+            }
+        }
+        unsafe {
+            PROCESS_LIST.replace(process_list);
+        }
     }
 }
 
@@ -162,6 +243,7 @@ pub fn exit() {
 }
 
 pub fn switch_to_user(process: &Process) -> ! {
+    println!("switch_to_user: {}", process.pid);
     unsafe { assembly::__tong_os_switch_to_user(process) }
 }
 

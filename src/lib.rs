@@ -3,6 +3,7 @@
 #![feature(alloc_prelude)]
 #![feature(global_asm)]
 #![feature(asm)]
+#![feature(llvm_asm)]
 #![feature(alloc_error_handler)]
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]

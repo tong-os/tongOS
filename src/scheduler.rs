@@ -14,8 +14,6 @@ pub fn schedule() -> &'static Option<Process> {
     unsafe {
         if let Some(mut process_list) = process::PROCESS_LIST.take() {
             loop {
-                // Shift list to left
-                process_list.rotate_left(1);
                 // Get first process
                 if let Some(p) = process_list.front() {
                     match p.state {
@@ -30,6 +28,8 @@ pub fn schedule() -> &'static Option<Process> {
                         ProcessState::Running => {}
                         ProcessState::Blocked => {}
                     }
+                } else {
+                    panic!("No more processes! Shutting down...")
                 }
             }
         }

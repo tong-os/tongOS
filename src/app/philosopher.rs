@@ -1,13 +1,21 @@
 use crate::lock::Mutex;
 use crate::process::{self, Process};
 
-const iterations: isize = 10;
+const iterations: isize = 3;
 const num_philosophers: isize = 5;
-const delay_iterations: isize = 1000000;
+const delay_iterations: isize = 100;
 
 static mut table: Mutex = Mutex::new();
 static mut chopstick: [Mutex; num_philosophers as usize] =
     [Mutex::new(); num_philosophers as usize];
+
+fn create_thread(i: usize) -> usize {
+    let proc = process::Process::new(philosopher_dinner as usize, i);
+    let pid = proc.pid;
+    process::process_list_add(proc);
+    
+    pid
+}
 
 fn delay(n: isize) {
     let mut sum = 0;
@@ -28,28 +36,28 @@ pub unsafe fn philosopher_dinner(n: isize) {
         num_philosophers - 1
     };
 
-    for _ in (0..=iterations).rev() {
+    for i in (0..=iterations).rev() {
         table.spin_lock();
-        println!("Philosopher {} is thinking", n);
+        println!("Philosopher {} is thinking. Iteration={}", n, i);
         table.unlock();
 
         delay(delay_iterations);
 
         table.spin_lock();
-        println!("Philosopher {} is hungry", n);
+        println!("Philosopher {} is hungry. Iteration={}", n, i);
         table.unlock();
 
         chopstick[first as usize].spin_lock();
         chopstick[second as usize].spin_lock();
 
         table.spin_lock();
-        println!("Philosopher {} is eating", n);
+        println!("Philosopher {} is eating. Iteration={}", n, i);
         table.unlock();
 
         delay(delay_iterations);
 
         table.spin_lock();
-        println!("Philosopher {} is sate", n);
+        println!("Philosopher {} is sate. Iteration={}", n, i);
         table.unlock();
 
         chopstick[first as usize].unlock();
@@ -68,10 +76,11 @@ pub unsafe fn main() {
 
     table.spin_lock();
 
-    // let mut philosopher: [Option<Process>; num_philosophers as usize] = [None; num_philosophers as usize];
+    let mut philosopher = [0; num_philosophers as usize];
 
     for i in 0..num_philosophers {
-        // philosopher[i as usize].replace(process::Process::new(philosopher_dinner as usize, 1));
+        println!("Creating philosopher: {}", i);
+        philosopher[i as usize] = create_thread(i as usize);
     }
 
     println!("Philosophers are alive and hungry!");
@@ -80,13 +89,14 @@ pub unsafe fn main() {
     table.unlock();
 
     for i in 0..num_philosophers {
-        // if let Some(&process) = philosopher[i as usize] {
-        //     process.join();
-        // }
+        let pid = philosopher[i as usize];
+        process::join(pid);
+
         table.spin_lock();
         println!("Philosopher {} ate {} times!", i, iterations);
         table.unlock();
     }
 
+    println!("Finished philosophers dinner!");
     process::exit();
 }
