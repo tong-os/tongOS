@@ -1,5 +1,5 @@
 [package]
-name = "tongOS"
+name = "tong_os"
 version = "0.10.1"
 authors = ["tarberd <bernardo.mferrari@gmail.com>"]
 edition = "2018"
