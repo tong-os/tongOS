@@ -112,6 +112,7 @@ extern "C" fn kinit(_hartid: usize) -> ! {
         "                |___/ ",
     ));
 
+
     let process = tong_os::process::Process::new(example_process1 as usize, 666);
     tong_os::process::process_list_add(process);
     let process = tong_os::process::Process::new(example_process2 as usize, 0);
@@ -127,3 +128,4 @@ extern "C" fn kinit(_hartid: usize) -> ! {
 
     loop {}
 }
+
