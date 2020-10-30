@@ -60,6 +60,19 @@ pub fn tong_os_trap(process: &mut Process) {
     if is_async {
         match cause {
             7 => {
+                println!("Handling async interrupt {} to process#{}", cause, process.pid);
+                unsafe {
+                    let mut old_process = process::PROCESS_RUNNING.take().unwrap();
+                    old_process.state = process::ProcessState::Ready;
+                    process::process_list_add(old_process);
+                    if let Some(next_process) = schedule() {
+                        println!("interrupt process {}, pc={:x}", next_process.pid, next_process.context.pc);
+                        schedule_machine_timer_interrupt(next_process.quantum);
+                        process::switch_to_user(&next_process);
+                    } else {
+                        panic!("Next process not found!");
+                    }
+                }
                 panic!("Unhandled machine timer interrupt!!");
             }
             _ => {
@@ -72,7 +85,7 @@ pub fn tong_os_trap(process: &mut Process) {
     } else {
         match cause {
             8 | 9 | 11 => {
-                println!("Handling exception {} to process#{}", cause, process.pid);
+                println!("Handling sync exception {} to process#{}", cause, process.pid);
                 // Check if child process needs to reschedule parent
                 if let Some(_ppid) = process.ppid {
                     // Otherwise, normal scheduling
@@ -84,6 +97,7 @@ pub fn tong_os_trap(process: &mut Process) {
                         unsafe {
                             process::PROCESS_RUNNING.as_mut().unwrap().context.pc += 4;
                         }
+                        schedule_machine_timer_interrupt(next_process.quantum);
                         process::switch_to_user(&next_process);
                     } else {
                         panic!("Next process not found!");
@@ -92,10 +106,13 @@ pub fn tong_os_trap(process: &mut Process) {
 
                 // Check if process has a child to schedule
                 if let Some(child_proc) = process.schedule_child() {
+                    schedule_machine_timer_interrupt(child_proc.quantum);
                     process::switch_to_user(&child_proc);
                 } else {
                     // Otherwise, normal scheduling
                     if let Some(next_process) = schedule() {
+                        println!("interrupt process {}, pc={:x}", next_process.pid, next_process.context.pc);
+                        schedule_machine_timer_interrupt(next_process.quantum);
                         process::switch_to_user(&next_process);
                     } else {
                         panic!("Next process not found!");

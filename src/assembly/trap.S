@@ -90,7 +90,7 @@ __tong_os_switch_to_user:
     # merge flags and mode
     or    t0, t0, a3
     # write to mstatus
-    csrw  mstatus, t1
+    csrw  mstatus, t0
 
     # write mepc with process pc
     csrw  mepc, a1

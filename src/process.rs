@@ -13,7 +13,7 @@ use alloc::collections::vec_deque::VecDeque;
 pub static mut PROCESS_RUNNING: Option<Process> = None;
 pub static mut PROCESS_LIST: Option<VecDeque<Process>> = None;
 pub static mut NEXT_PID: usize = 0;
-pub static DEFAULT_QUANTUM: usize = 666;
+pub static DEFAULT_QUANTUM: usize = 1;
 // Process States
 // Tanenbaum, Modern Operating Systems
 // Ready -> Running = picked by scheduler

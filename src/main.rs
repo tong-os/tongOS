@@ -73,6 +73,16 @@ fn example_process2() -> () {
     tong_os::process::exit();
 }
 
+fn example_process3(iteration: usize) {
+    println!("Counting for {}", iteration);
+    let mut my_counter = 0;
+    for _ in 0..iteration {
+        my_counter += 1;
+    }
+    println!("Ex3 counter = {}. Expected = {}", my_counter, iteration);
+    tong_os::process::exit();
+}
+    
 #[no_mangle]
 extern "C" fn kinit(_hartid: usize) -> ! {
     tong_os::uart::Uart::new(0x1000_0000).init();
@@ -118,11 +128,15 @@ extern "C" fn kinit(_hartid: usize) -> ! {
     tong_os::process::process_list_add(process);
     // let process = tong_os::process::Process::new(tong_os::app::philosopher::main as usize, 0);
     // tong_os::process::process_list_add(process);
+    let process = tong_os::process::Process::new(example_process3 as usize, 666);
+    tong_os::process::process_list_add(process);
+    let process = tong_os::process::Process::new(example_process3 as usize, 42);
+    tong_os::process::process_list_add(process);
 
     println!("scheduling!");
     if let Some(next_process) = tong_os::scheduler::schedule() {
         println!("switching to user ...");
-        tong_os::trap::schedule_machine_timer_interrupt(1);
+        tong_os::trap::schedule_machine_timer_interrupt(next_process.quantum);
         tong_os::process::switch_to_user(&next_process);
     }
 
