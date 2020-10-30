@@ -83,14 +83,14 @@ __tong_os_switch_to_user:
     # Load processor mode
     ld a3, 67*8(a0)
 
-    # disable interruptions
-    li t0, 0
+    # enable machine interruptions
+    li t0, 1 << 3
     # shift mode to correct place
     slli  a3, a3, 11
     # merge flags and mode
     or    t0, t0, a3
     # write to mstatus
-    csrw  mstatus, t0
+    csrw  mstatus, t1
 
     # write mepc with process pc
     csrw  mepc, a1
