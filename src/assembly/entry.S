@@ -12,6 +12,7 @@ set_global_pointer:
 .option pop
 
 set_early_trap_vector:
+    csrw mie, zero
     la t0, early_trap_vector
     csrw mtvec, t0
 
