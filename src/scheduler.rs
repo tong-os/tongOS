@@ -3,14 +3,14 @@
 // Stephen Marz
 // tongOs team
 
-use crate::process::{self, print_process_list, Process, ProcessState};
+use crate::process::{self, Process, ProcessState};
 
 // next_process = schedule()
 // switch_context(current_process, next_process)
 pub fn schedule() -> &'static Option<Process> {
     // Try to get process list reference
-    println!("SCHEDULING!");
-    print_process_list();
+    debug!("SCHEDULING!");
+    // process::print_process_list();
     unsafe {
         if let Some(mut process_list) = process::PROCESS_LIST.take() {
             loop {
