@@ -3,20 +3,15 @@
 // Stephen Marz
 // tongOS team
 
-use crate::cpu::CONTEXT_SWITCH_TIME;
+use crate::cpu::{enable_global_interrupts, GeneralPurposeRegister, CONTEXT_SWITCH_TIME};
 use crate::process::{self, Process};
 use crate::scheduler::schedule;
 
 pub fn init() {
     use crate::assembly::__tong_os_trap;
 
-    let mstatus: usize;
-    unsafe { asm!("csrr {}, mstatus", out(reg) mstatus) }
-
-    // [3] = MIE (Machine Interrupt Enable)
-    let flags = 1 << 3;
-    let mstatus = mstatus | flags;
-    unsafe { asm!("csrw mstatus, {}", in(reg) mstatus) }
+    // configure mstatus
+    enable_global_interrupts();
 
     let mie: usize;
     unsafe { asm!("csrr {}, mie", out(reg) mie) }
@@ -50,7 +45,7 @@ pub fn tong_os_trap(process: &mut Process) {
     unsafe {
         asm!("csrr {}, mcause", out(reg) mcause);
     }
-    println!("In tongo_os_trap!");
+    debug!("In tongo_os_trap!");
 
     // Get interrupt bit from mcause
     let is_async = mcause >> 63 & 1 == 1;
@@ -60,20 +55,25 @@ pub fn tong_os_trap(process: &mut Process) {
     if is_async {
         match cause {
             7 => {
-                println!("Handling async interrupt {} to process#{}", cause, process.pid);
+                debug!(
+                    "Handling async timer interrupt: mcause {}, pid {}",
+                    cause, process.pid
+                );
                 unsafe {
                     let mut old_process = process::PROCESS_RUNNING.take().unwrap();
                     old_process.state = process::ProcessState::Ready;
                     process::process_list_add(old_process);
                     if let Some(next_process) = schedule() {
-                        println!("interrupt process {}, pc={:x}", next_process.pid, next_process.context.pc);
+                        debug!(
+                            "interrupt process {}, pc={:x}",
+                            next_process.pid, next_process.context.pc
+                        );
                         schedule_machine_timer_interrupt(next_process.quantum);
                         process::switch_to_user(&next_process);
                     } else {
                         panic!("Next process not found!");
                     }
                 }
-                panic!("Unhandled machine timer interrupt!!");
             }
             _ => {
                 panic!(
@@ -84,38 +84,62 @@ pub fn tong_os_trap(process: &mut Process) {
         }
     } else {
         match cause {
-            8 | 9 | 11 => {
-                println!("Handling sync exception {} to process#{}", cause, process.pid);
-                // Check if child process needs to reschedule parent
-                if let Some(_ppid) = process.ppid {
-                    // Otherwise, normal scheduling
-                    println!("Scheduling father process");
-                    process::print_process_list();
+            8 => {
+                let which_code = process.context.regs[GeneralPurposeRegister::A0 as usize];
 
-                    if let Some(next_process) = schedule() {
-                        println!("PPID={}", next_process.pid);
-                        unsafe {
-                            process::PROCESS_RUNNING.as_mut().unwrap().context.pc += 4;
+                debug!(
+                    "Handling user ecall exception: mcause {}, pid {}, syscall code {}",
+                    cause, process.pid, which_code,
+                );
+
+                match which_code {
+                    // Exiting process
+                    0 => {
+                        // Check if child process needs to reschedule parent
+                        if let Some(_ppid) = process.ppid {
+                            debug!("Scheduling father process");
+                            // process::print_process_list();
+
+                            if let Some(next_process) = schedule() {
+                                debug!("PPID={}", next_process.pid);
+                                unsafe {
+                                    process::PROCESS_RUNNING.as_mut().unwrap().context.pc += 4;
+                                }
+                                process::switch_to_user(&next_process);
+                            } else {
+                                panic!("Next process not found!");
+                            }
                         }
-                        schedule_machine_timer_interrupt(next_process.quantum);
-                        process::switch_to_user(&next_process);
-                    } else {
-                        panic!("Next process not found!");
+        
+                        // Check if process has a child to schedule
+                        if let Some(child_proc) = process.schedule_child() {
+                            // schedule_machine_timer_interrupt(child_proc.quantum);
+                            process::switch_to_user(&child_proc);
+                        } else {
+                            // Otherwise, normal scheduling
+                            if let Some(next_process) = schedule() {
+                                debug!("interrupt process {}, pc={:x}", next_process.pid, next_process.context.pc);
+                                // schedule_machine_timer_interrupt(next_process.quantum);
+                                process::switch_to_user(&next_process);
+                            } else {
+                                panic!("Next process not found!");
+                            }
+                        }
                     }
-                }
-
-                // Check if process has a child to schedule
-                if let Some(child_proc) = process.schedule_child() {
-                    schedule_machine_timer_interrupt(child_proc.quantum);
-                    process::switch_to_user(&child_proc);
-                } else {
-                    // Otherwise, normal scheduling
-                    if let Some(next_process) = schedule() {
-                        println!("interrupt process {}, pc={:x}", next_process.pid, next_process.context.pc);
-                        schedule_machine_timer_interrupt(next_process.quantum);
-                        process::switch_to_user(&next_process);
-                    } else {
-                        panic!("Next process not found!");
+                    // Create thread
+                    1 => {
+                        let process_address =
+                            process.context.regs[GeneralPurposeRegister::A1 as usize];
+                        let process_arg = process.context.regs[GeneralPurposeRegister::A2 as usize];
+                        let new_process = process::Process::new(process_address, process_arg);
+                        let new_process_pid = new_process.pid;
+                        process::process_list_add(new_process);
+                        process.context.regs[GeneralPurposeRegister::A0 as usize] = new_process_pid;
+                        process.context.pc += 4;
+                        process::switch_to_user(process);
+                    }
+                    code => {
+                        panic!("Unhandled user ecall with code {}", code);
                     }
                 }
             }

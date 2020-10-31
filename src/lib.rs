@@ -13,6 +13,8 @@ extern crate alloc;
 
 use alloc::prelude::v1::*;
 
+pub const DEBUG_OUTPUT: bool = true;
+
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
     println!("Running {} tests", tests.len());
@@ -40,6 +42,25 @@ macro_rules! println {
     }};
     ($fmt:expr, $($args:tt)+) => {{
         print!(concat!($fmt, "\r\n"), $($args)+)
+    }};
+}
+
+#[macro_export]
+macro_rules! debug {
+    () => {{
+        if crate::DEBUG_OUTPUT {
+            println!()
+        }
+    }};
+    ($fmt:expr) => {{
+        if crate::DEBUG_OUTPUT {
+            println!($fmt)
+        }
+    }};
+    ($fmt:expr, $($args:tt)+) => {{
+        if crate::DEBUG_OUTPUT {
+            println!($fmt, $($args)+)
+        }
     }};
 }
 
