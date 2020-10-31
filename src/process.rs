@@ -7,7 +7,6 @@ use crate::assembly;
 use crate::cpu::{self, CpuMode, TrapFrame};
 use crate::page::{self, PageTableEntryFlags, Sv39PageTable};
 
-use alloc::boxed::Box;
 use alloc::collections::vec_deque::VecDeque;
 
 pub static mut PROCESS_RUNNING: Option<Process> = None;
@@ -178,14 +177,38 @@ impl Drop for Process {
     }
 }
 
+fn make_user_syscall(arg0: usize, arg1: usize, arg2: usize) {
+    unsafe {
+        // asm!("mv a0, {}", in(reg) arg0);
+        // asm!("mv a1, {}", in(reg) arg1);
+        // asm!("mv a2, {}", in(reg) arg2);
+        asm!("ECALL");
+    }
+}
+
+pub fn create_thread(func: usize, arg0: usize) -> usize {
+    make_user_syscall(1, func, arg0);
+    let pid: usize;
+    unsafe {
+        asm!("mv {}, a0", out(reg) pid);
+    }
+    pid
+}
+
+pub fn exit() {
+    unsafe {
+        debug!("exiting from pid: {}", PROCESS_RUNNING.as_ref().unwrap().pid);
+    }
+    make_user_syscall(0, 0, 0);
+}
+
 pub fn join(pid: usize) {
     // Parent process called join
     match unsafe { PROCESS_RUNNING.take() } {
         Some(process) => {
             let ppid = process.pid;
             unsafe { PROCESS_RUNNING.replace(process) };
-
-            println!("running pid {} join pid {}", ppid, pid);
+            debug!("running pid {} join pid {}", ppid, pid);
 
             //set ppid of pid
             set_ppid(pid, ppid);
@@ -238,12 +261,8 @@ pub fn process_list_remove(pid: usize) {
     }
 }
 
-pub fn exit() {
-    unsafe { asm!("ECALL") };
-}
-
 pub fn switch_to_user(process: &Process) -> ! {
-    println!("switch_to_user: {}", process.pid);
+    debug!("switch_to_user: {}", process.pid);
     unsafe { assembly::__tong_os_switch_to_user(process) }
 }
 

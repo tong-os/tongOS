@@ -4,13 +4,10 @@
 // Stephen Marz
 // tongOS team
 
-
-
 // The frequency of QEMU is 10 MHz
 pub const FREQ: u64 = 10_000_000;
 // Let's do this 250 times per second for switching
 pub const CONTEXT_SWITCH_TIME: u64 = FREQ / 500;
-
 
 #[repr(usize)]
 pub enum CpuMode {
@@ -126,4 +123,23 @@ pub const fn build_satp(asid: usize, pysical_address: usize) -> usize {
     let pysical_page_number = pysical_address >> page::PAGE_ORDER & ppn_mask;
 
     mode | asid | pysical_page_number
+}
+
+pub fn disable_global_interrupts() {
+    unsafe {
+        let mstatus: usize;
+        asm!("csrr {}, mstatus", out(reg) mstatus);
+        let mstatus = mstatus & !(1 << 3);
+        asm!("csrw mstatus, {}", in(reg) mstatus);
+    }
+}
+
+pub fn enable_global_interrupts() {
+    unsafe {
+        let mstatus: usize;
+        asm!("csrr {}, mstatus", out(reg) mstatus);
+        // [3] = MIE (Machine Interrupt Enable)
+        let mstatus = mstatus | (1 << 3);
+        asm!("csrw mstatus, {}", in(reg) mstatus);
+    }
 }
