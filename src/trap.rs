@@ -3,7 +3,7 @@
 // Stephen Marz
 // tongOS team
 
-use crate::cpu::{enable_global_interrupts, GeneralPurposeRegister, CONTEXT_SWITCH_TIME};
+use crate::cpu::{GeneralPurposeRegister, CONTEXT_SWITCH_TIME};
 use crate::process::{self, Process};
 use crate::scheduler::schedule;
 
@@ -11,7 +11,7 @@ pub fn init() {
     use crate::assembly::__tong_os_trap;
 
     // configure mstatus
-    enable_global_interrupts();
+    // enable_global_interrupts();
 
     let mie: usize;
     unsafe { asm!("csrr {}, mie", out(reg) mie) }
@@ -31,11 +31,13 @@ pub const MMIO_MTIME: *const u64 = 0x0200_BFF8 as *const u64;
 
 pub fn schedule_machine_timer_interrupt(quantum: usize) {
     unsafe {
-        MMIO_MTIMECMP.write_volatile(
-            MMIO_MTIME
-                .read_volatile()
-                .wrapping_add(CONTEXT_SWITCH_TIME * quantum as u64),
-        );
+        if crate::ENABLE_PREEMPTION {
+            MMIO_MTIMECMP.write_volatile(
+                MMIO_MTIME
+                    .read_volatile()
+                    .wrapping_add(CONTEXT_SWITCH_TIME * quantum as u64),
+            );
+        }
     }
 }
 
@@ -96,34 +98,19 @@ pub fn tong_os_trap(process: &mut Process) {
                     // Exiting process
                     0 => {
                         // Check if child process needs to reschedule parent
-                        if let Some(_ppid) = process.ppid {
-                            debug!("Scheduling father process");
-                            // process::print_process_list();
-
-                            if let Some(next_process) = schedule() {
-                                debug!("PPID={}", next_process.pid);
-                                unsafe {
-                                    process::PROCESS_RUNNING.as_mut().unwrap().context.pc += 4;
-                                }
-                                process::switch_to_user(&next_process);
-                            } else {
-                                panic!("Next process not found!");
-                            }
+                        if let Some(blocked_pid) = process.blocking_pid {
+                            process::wake_process(blocked_pid);
                         }
-        
-                        // Check if process has a child to schedule
-                        if let Some(child_proc) = process.schedule_child() {
-                            // schedule_machine_timer_interrupt(child_proc.quantum);
-                            process::switch_to_user(&child_proc);
+
+                        if let Some(next_process) = schedule() {
+                            debug!(
+                                "interrupt process {}, pc={:x}",
+                                next_process.pid, next_process.context.pc
+                            );
+                            schedule_machine_timer_interrupt(next_process.quantum);
+                            process::switch_to_user(&next_process);
                         } else {
-                            // Otherwise, normal scheduling
-                            if let Some(next_process) = schedule() {
-                                debug!("interrupt process {}, pc={:x}", next_process.pid, next_process.context.pc);
-                                // schedule_machine_timer_interrupt(next_process.quantum);
-                                process::switch_to_user(&next_process);
-                            } else {
-                                panic!("Next process not found!");
-                            }
+                            panic!("Next process not found!");
                         }
                     }
                     // Create thread
@@ -137,6 +124,37 @@ pub fn tong_os_trap(process: &mut Process) {
                         process.context.regs[GeneralPurposeRegister::A0 as usize] = new_process_pid;
                         process.context.pc += 4;
                         process::switch_to_user(process);
+                    }
+                    2 => {
+                        let joining_pid = process.context.regs[GeneralPurposeRegister::A1 as usize];
+
+                        // if joining pid has already exited
+                        if !process::process_list_contains(joining_pid) {
+                            // add runnign to proc list as readdy and schedule
+                            let mut running = unsafe { process::PROCESS_RUNNING.take().unwrap() };
+                            running.state = process::ProcessState::Ready;
+                            running.context.pc += 4;
+                            process::process_list_add(running);
+                            if let Some(next) = schedule() {
+                                schedule_machine_timer_interrupt(next.quantum);
+                                process::switch_to_user(next);
+                            } else {
+                                panic!("Joining non existent process failure");
+                            }
+                        } else {
+                            let mut running = unsafe { process::PROCESS_RUNNING.take().unwrap() };
+                            running.state = process::ProcessState::Blocked;
+                            running.context.pc += 4;
+                            let blocking_pid = running.pid;
+                            process::process_list_add(running);
+                            process::set_blocking_pid(joining_pid, blocking_pid);
+                            if let Some(next) = schedule() {
+                                schedule_machine_timer_interrupt(next.quantum);
+                                process::switch_to_user(next);
+                            } else {
+                                panic!("Joining existent process failure");
+                            }
+                        }
                     }
                     code => {
                         panic!("Unhandled user ecall with code {}", code);

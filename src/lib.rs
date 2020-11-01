@@ -13,7 +13,8 @@ extern crate alloc;
 
 use alloc::prelude::v1::*;
 
-pub const DEBUG_OUTPUT: bool = true;
+pub const DEBUG_OUTPUT: bool = false;
+pub const ENABLE_PREEMPTION: bool = true;
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {

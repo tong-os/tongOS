@@ -58,7 +58,7 @@ pub unsafe fn philosopher_dinner(n: isize) {
     }
 
     TABLE.spin_lock();
-    println!("done");
+    println!("Philosopher {} is done!", {n});
     TABLE.unlock();
 
     process::exit();

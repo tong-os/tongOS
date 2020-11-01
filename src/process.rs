@@ -37,10 +37,12 @@ pub struct Process {
     pub quantum: usize,
     pub pid: usize,
     pub ppid: Option<usize>,
+    pub blocking_pid: Option<usize>,
 }
 
 impl Process {
     pub fn new(start: usize, arg0: usize) -> Self {
+        // cpu::disable_global_interrupts();
         let mut context = TrapFrame::new();
         context.pc = start as usize;
         context.mode = CpuMode::User as usize;
@@ -123,7 +125,7 @@ impl Process {
             }
         }
 
-        Process {
+        let proc = Process {
             context,
             stack: stack as *mut u8,
             state: ProcessState::Ready,
@@ -131,7 +133,10 @@ impl Process {
             quantum: DEFAULT_QUANTUM,
             pid,
             ppid: None,
-        }
+            blocking_pid: None,
+        };
+        // cpu::enable_global_interrupts();
+        proc
     }
 
     // If process has child, return it to reschedule
@@ -170,7 +175,7 @@ impl Process {
 
 impl Drop for Process {
     fn drop(&mut self) {
-        println!("drop pid: {}", self.pid);
+        debug!("drop pid: {}", self.pid);
         page::dealloc(self.stack);
         unsafe { (*self.page_table).unmap() }
         page::dealloc(self.page_table as *mut u8);
@@ -179,9 +184,6 @@ impl Drop for Process {
 
 fn make_user_syscall(arg0: usize, arg1: usize, arg2: usize) {
     unsafe {
-        // asm!("mv a0, {}", in(reg) arg0);
-        // asm!("mv a1, {}", in(reg) arg1);
-        // asm!("mv a2, {}", in(reg) arg2);
         asm!("ECALL");
     }
 }
@@ -196,26 +198,29 @@ pub fn create_thread(func: usize, arg0: usize) -> usize {
 }
 
 pub fn exit() {
+    // (exit do joining pid, botar o processo do atributo para ready)
     unsafe {
-        debug!("exiting from pid: {}", PROCESS_RUNNING.as_ref().unwrap().pid);
+        debug!(
+            "exiting from pid: {}",
+            PROCESS_RUNNING.as_ref().unwrap().pid
+        );
     }
     make_user_syscall(0, 0, 0);
 }
 
+// o processo running chamma chreate threat
+// até que seu quantum acabe ou durante seu quantum ele chame join
+// caso o quantum acabee: se coloque de volta na lista como ready
+// caso de join em agluem:
 pub fn join(pid: usize) {
-    // Parent process called join
-    match unsafe { PROCESS_RUNNING.take() } {
-        Some(process) => {
-            let ppid = process.pid;
-            unsafe { PROCESS_RUNNING.replace(process) };
-            debug!("running pid {} join pid {}", ppid, pid);
-
-            //set ppid of pid
-            set_ppid(pid, ppid);
-            exit();
-        }
-        None => panic!("Join called but there is no running process!"),
+    unsafe {
+        debug!(
+            "Join running.pid: {}, waiting pid {}",
+            PROCESS_RUNNING.as_ref().unwrap().pid,
+            pid
+        );
     }
+    make_user_syscall(2, pid, 0);
 }
 
 pub fn set_ppid(pid: usize, ppid: usize) {
@@ -223,6 +228,32 @@ pub fn set_ppid(pid: usize, ppid: usize) {
         for process in &mut process_list {
             if process.pid == pid {
                 process.ppid = Some(ppid);
+            }
+        }
+        unsafe {
+            PROCESS_LIST.replace(process_list);
+        }
+    }
+}
+
+pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
+    if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
+        for process in &mut process_list {
+            if process.pid == pid {
+                process.blocking_pid = Some(blocking_pid);
+            }
+        }
+        unsafe {
+            PROCESS_LIST.replace(process_list);
+        }
+    }
+}
+
+pub fn wake_process(blocked_pid: usize) {
+    if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
+        for process in &mut process_list {
+            if process.pid == blocked_pid {
+                process.state = ProcessState::Ready;
             }
         }
         unsafe {
@@ -259,6 +290,20 @@ pub fn process_list_remove(pid: usize) {
             PROCESS_LIST.replace(process_list);
         }
     }
+}
+
+pub fn process_list_contains(pid: usize) -> bool {
+    let mut contains = false;
+    if let Some(process_list) = unsafe { PROCESS_LIST.take() } {
+        if let Some(_) = process_list.iter().position(|process| process.pid == pid) {
+            contains = true;
+        }
+
+        unsafe {
+            PROCESS_LIST.replace(process_list);
+        }
+    }
+    contains
 }
 
 pub fn switch_to_user(process: &Process) -> ! {
