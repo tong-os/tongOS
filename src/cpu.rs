@@ -126,6 +126,7 @@ pub const fn build_satp(asid: usize, pysical_address: usize) -> usize {
 }
 
 pub fn disable_global_interrupts() {
+    println!("disable!");
     unsafe {
         let mstatus: usize;
         asm!("csrr {}, mstatus", out(reg) mstatus);
@@ -135,6 +136,7 @@ pub fn disable_global_interrupts() {
 }
 
 pub fn enable_global_interrupts() {
+    println!("enable");
     unsafe {
         let mstatus: usize;
         asm!("csrr {}, mstatus", out(reg) mstatus);

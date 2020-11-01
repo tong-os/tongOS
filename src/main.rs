@@ -126,17 +126,17 @@ extern "C" fn kinit(_hartid: usize) -> ! {
     // tong_os::process::process_list_add(process);
     // let process = tong_os::process::Process::new(example_process2 as usize, 0);
     // tong_os::process::process_list_add(process);
-    let process = tong_os::process::Process::new(tong_os::app::philosopher::main as usize, 0);
-    tong_os::process::process_list_add(process);
     // let process = tong_os::process::Process::new(example_process3 as usize, 666);
     // tong_os::process::process_list_add(process);
     // let process = tong_os::process::Process::new(example_process3 as usize, 42);
     // tong_os::process::process_list_add(process);
+    let process = tong_os::process::Process::new(tong_os::app::philosopher::main as usize, 0);
+    tong_os::process::process_list_add(process);
 
     println!("scheduling!");
     if let Some(next_process) = tong_os::scheduler::schedule() {
         println!("switching to user ...");
-        // tong_os::trap::schedule_machine_timer_interrupt(next_process.quantum);
+        tong_os::trap::schedule_machine_timer_interrupt(next_process.quantum);
         tong_os::process::switch_to_user(&next_process);
     }
 
