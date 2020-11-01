@@ -84,7 +84,7 @@ __tong_os_switch_to_user:
     ld a3, 67*8(a0)
 
     # enable machine interruptions
-    li t0, 1 << 3
+    li t0, 0
     # shift mode to correct place
     slli  a3, a3, 11
     # merge flags and mode

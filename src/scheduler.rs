@@ -26,7 +26,9 @@ pub fn schedule() -> &'static Option<Process> {
                             return &process::PROCESS_RUNNING;
                         }
                         ProcessState::Running => {}
-                        ProcessState::Blocked => {}
+                        ProcessState::Blocked => {
+                            process_list.rotate_left(1);
+                        }
                     }
                 } else {
                     panic!("No more processes! Shutting down...")
