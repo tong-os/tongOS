@@ -3,7 +3,7 @@
 // Stephen Marz
 // tongOS team
 
-use crate::cpu::{GeneralPurposeRegister, CONTEXT_SWITCH_TIME};
+use crate::cpu::{self, GeneralPurposeRegister};
 use crate::process::{self, Process};
 use crate::scheduler::schedule;
 
@@ -35,7 +35,7 @@ pub fn schedule_machine_timer_interrupt(quantum: usize) {
             MMIO_MTIMECMP.write_volatile(
                 MMIO_MTIME
                     .read_volatile()
-                    .wrapping_add(CONTEXT_SWITCH_TIME * quantum as u64),
+                    .wrapping_add(cpu::CONTEXT_SWITCH_TIME * quantum as u64),
             );
         }
     }
@@ -153,6 +153,35 @@ pub fn tong_os_trap(process: &mut Process) {
                                 process::switch_to_user(next);
                             } else {
                                 panic!("Joining existent process failure");
+                            }
+                        }
+                    }
+                    // syscall sleep
+                    3 => {
+                        let mut running = unsafe { process::PROCESS_RUNNING.take().unwrap() };
+                        let amount = running.context.regs[GeneralPurposeRegister::A1 as usize];
+                        running.sleep_until = unsafe {
+                            MMIO_MTIME.read_volatile() as usize
+                                + amount * cpu::CONTEXT_SWITCH_TIME as usize
+                        };
+                        running.state = process::ProcessState::Sleeping;
+                        running.context.pc += 4;
+
+                        if crate::ENABLE_PREEMPTION {
+                            process::process_list_add(running);
+
+                            if let Some(next) = schedule() {
+                                schedule_machine_timer_interrupt(next.quantum);
+                                process::switch_to_user(next);
+                            } else {
+                                panic!("Sleeping process could not re-schedule");
+                            }
+                        } else {
+                            unsafe {
+                                while (MMIO_MTIME.read_volatile() as usize) < running.sleep_until {}
+                                running.state = process::ProcessState::Running;
+                                process::PROCESS_RUNNING.replace(running);
+                                process::switch_to_user(process::PROCESS_RUNNING.as_ref().unwrap());
                             }
                         }
                     }

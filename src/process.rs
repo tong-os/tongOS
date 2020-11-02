@@ -18,13 +18,16 @@ pub static DEFAULT_QUANTUM: usize = 1;
 // Ready -> Running = picked by scheduler
 // Running -> Ready = scheduler picks another process
 // Running -> Blocked = blocked for input
+// Running -> Sleeping = process sleep
 // Blocked -> Ready = input available now
+// Sleeping -> Running/Ready = wake up
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub enum ProcessState {
     Ready,
     Running,
     Blocked,
+    Sleeping,
 }
 
 #[derive(Debug, Clone)]
@@ -36,8 +39,8 @@ pub struct Process {
     pub page_table: *mut Sv39PageTable,
     pub quantum: usize,
     pub pid: usize,
-    pub ppid: Option<usize>,
     pub blocking_pid: Option<usize>,
+    pub sleep_until: usize,
 }
 
 impl Process {
@@ -132,44 +135,11 @@ impl Process {
             page_table,
             quantum: DEFAULT_QUANTUM,
             pid,
-            ppid: None,
             blocking_pid: None,
+            sleep_until: 0,
         };
         // cpu::enable_global_interrupts();
         proc
-    }
-
-    // If process has child, return it to reschedule
-    pub fn schedule_child(&self) -> &'static Option<Process> {
-        unsafe {
-            if let Some(mut process_list) = PROCESS_LIST.take() {
-                if let Some(p) = process_list.front() {
-                    match p.ppid {
-                        Some(pid) if pid == self.pid => {
-                            let mut first = process_list.pop_front().unwrap();
-                            first.state = ProcessState::Running;
-
-                            let mut running = PROCESS_RUNNING.take().unwrap();
-
-                            running.state = ProcessState::Ready;
-
-                            process_list.push_front(running);
-
-                            PROCESS_RUNNING.replace(first);
-
-                            PROCESS_LIST.replace(process_list);
-                            return &PROCESS_RUNNING;
-                        }
-                        Some(_) => (),
-                        None => (),
-                    }
-                } else {
-                    panic!("No more processes! Shutting down...")
-                }
-                PROCESS_LIST.replace(process_list);
-            }
-        }
-        &None
     }
 }
 
@@ -198,7 +168,6 @@ pub fn create_thread(func: usize, arg0: usize) -> usize {
 }
 
 pub fn exit() {
-    // (exit do joining pid, botar o processo do atributo para ready)
     unsafe {
         debug!(
             "exiting from pid: {}",
@@ -208,10 +177,6 @@ pub fn exit() {
     make_user_syscall(0, 0, 0);
 }
 
-// o processo running chamma chreate threat
-// até que seu quantum acabe ou durante seu quantum ele chame join
-// caso o quantum acabee: se coloque de volta na lista como ready
-// caso de join em agluem:
 pub fn join(pid: usize) {
     unsafe {
         debug!(
@@ -223,17 +188,8 @@ pub fn join(pid: usize) {
     make_user_syscall(2, pid, 0);
 }
 
-pub fn set_ppid(pid: usize, ppid: usize) {
-    if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
-        for process in &mut process_list {
-            if process.pid == pid {
-                process.ppid = Some(ppid);
-            }
-        }
-        unsafe {
-            PROCESS_LIST.replace(process_list);
-        }
-    }
+pub fn sleep(amount: usize) {
+    make_user_syscall(3, amount, 0);
 }
 
 pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {

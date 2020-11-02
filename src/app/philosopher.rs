@@ -3,23 +3,11 @@ use crate::process;
 
 const ITERATIONS: isize = 3;
 const NUM_PHILOSOPHERS: isize = 5;
-const DELAY_ITERATIONS: isize = 100;
+const SLEEP_TIME: usize = 500;
 
 static mut TABLE: Mutex = Mutex::new();
 static mut CHOPSTICK: [Mutex; NUM_PHILOSOPHERS as usize] =
     [Mutex::new(); NUM_PHILOSOPHERS as usize];
-
-fn delay(n: isize) -> isize {
-    let mut sum = 0;
-    for i in 0..n {
-        for j in 0..n {
-            for k in 0..n {
-                sum += i * j + 6 * k;
-            }
-        }
-    }
-    sum
-}
 
 pub unsafe fn philosopher_dinner(n: isize) {
     let first = if n < (NUM_PHILOSOPHERS - 1) { n } else { 0 };
@@ -34,7 +22,7 @@ pub unsafe fn philosopher_dinner(n: isize) {
         println!("Philosopher {} is thinking. Iteration={}", n, i);
         TABLE.unlock();
 
-        delay(DELAY_ITERATIONS);
+        process::sleep(SLEEP_TIME);
 
         TABLE.spin_lock();
         println!("Philosopher {} is hungry. Iteration={}", n, i);
@@ -47,7 +35,7 @@ pub unsafe fn philosopher_dinner(n: isize) {
         println!("Philosopher {} is eating. Iteration={}", n, i);
         TABLE.unlock();
 
-        delay(DELAY_ITERATIONS);
+        process::sleep(SLEEP_TIME);
 
         TABLE.spin_lock();
         println!("Philosopher {} is sate. Iteration={}", n, i);
@@ -58,7 +46,7 @@ pub unsafe fn philosopher_dinner(n: isize) {
     }
 
     TABLE.spin_lock();
-    println!("Philosopher {} is done!", {n});
+    println!("Philosopher {} is done!", { n });
     TABLE.unlock();
 
     process::exit();
