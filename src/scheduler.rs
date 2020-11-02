@@ -26,6 +26,20 @@ pub fn schedule() -> &'static Option<Process> {
                             return &process::PROCESS_RUNNING;
                         }
                         ProcessState::Running => {}
+                        ProcessState::Sleeping => {
+                            let current_time = crate::trap::MMIO_MTIME.read_volatile() as usize;
+
+                            if p.sleep_until < current_time {
+                                let mut first = process_list.pop_front().unwrap();
+                                first.state = ProcessState::Running;
+                                process::PROCESS_RUNNING.replace(first);
+
+                                process::PROCESS_LIST.replace(process_list);
+                                return &process::PROCESS_RUNNING;
+                            } else {
+                                process_list.rotate_left(1);
+                            }
+                        }
                         ProcessState::Blocked => {
                             process_list.rotate_left(1);
                         }
