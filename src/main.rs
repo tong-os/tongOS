@@ -82,7 +82,7 @@ fn example_process3(iteration: usize) {
     println!("Ex3 counter = {}. Expected = {}", my_counter, iteration);
     tong_os::process::exit();
 }
-    
+
 #[no_mangle]
 extern "C" fn kinit(_hartid: usize) -> ! {
     tong_os::uart::Uart::new(0x1000_0000).init();
@@ -130,7 +130,9 @@ extern "C" fn kinit(_hartid: usize) -> ! {
     // tong_os::process::process_list_add(process);
     // let process = tong_os::process::Process::new(example_process3 as usize, 42);
     // tong_os::process::process_list_add(process);
-    let process = tong_os::process::Process::new(tong_os::app::philosopher::main as usize, 0);
+    // let process = tong_os::process::Process::new(tong_os::app::philosopher::main as usize, 0);
+    // tong_os::process::process_list_add(process);
+    let process = tong_os::process::Process::new(tong_os::app::input_example::main as usize, 0);
     tong_os::process::process_list_add(process);
 
     println!("scheduling!");

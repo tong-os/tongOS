@@ -192,6 +192,11 @@ pub fn sleep(amount: usize) {
     make_user_syscall(3, amount, 0);
 }
 
+pub fn input_keyboard(buffer: &mut alloc::string::String) {
+    make_user_syscall(4, buffer as *mut _ as usize, 0);
+    while unsafe { crate::uart::READING } {}
+}
+
 pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
     if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
         for process in &mut process_list {

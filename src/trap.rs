@@ -4,6 +4,8 @@
 // tongOS team
 
 use crate::cpu::{self, GeneralPurposeRegister};
+use crate::plic;
+use crate::uart;
 use crate::process::{self, Process};
 use crate::scheduler::schedule;
 
@@ -13,13 +15,9 @@ pub fn init() {
     // configure mstatus
     // enable_global_interrupts();
 
-    let mie: usize;
-    unsafe { asm!("csrr {}, mie", out(reg) mie) }
-
     // [7] = MTIE (Machine Time Interrupt Enable)
     let flags = 1 << 7;
-    let mie = mie | flags;
-    unsafe { asm!("csrw mie, {}", in(reg) mie) }
+    unsafe { asm!("csrw mie, {}", in(reg) flags) }
 
     unsafe { asm!("csrw mtvec, {}", in(reg) (__tong_os_trap as usize)) }
 }
@@ -77,6 +75,67 @@ pub fn tong_os_trap(process: &mut Process) {
                     }
                 }
             }
+            11 => unsafe {
+                println!("trantando external interrupt");
+
+                let buffer: &mut alloc::string::String =
+                    core::mem::transmute(process.context.regs[GeneralPurposeRegister::A1 as usize]);
+
+                // let mut buffer = alloc::string::String::new();
+
+                println!("buffer: {}", buffer);
+
+                if let Some(external_interrupt) = plic::next() {
+                    match external_interrupt {
+                        // UART
+                        10 => {
+                            let mut uart = uart::Uart::new(0x1000_0000);
+                            println!("create uart");
+
+                            if let Some(c) = uart.get() {
+                                match c {
+                                    // backspace
+                                    8 => {
+                                        // remove last char from buffer
+                                        buffer.pop();
+                                        
+                                        process.context.pc += 4;
+                                        process::switch_to_user(process);
+                                    }
+                                    10 | 13 => {
+                                        // plic complete interrupt
+
+                                        
+                                        plic::complete(external_interrupt);
+
+                                        let flags = 1 << 7;
+                                        asm!("csrw mie, {}", in(reg) flags);
+
+                                        uart::READING = false;
+                                        
+                                        process.context.pc += 4;
+                                        schedule_machine_timer_interrupt(process.quantum);
+                                        process::switch_to_user(process);
+                                    }
+                                    _ => {
+                                        println!("pushing char: {}", c);
+                                        // add char in buffer
+                                        buffer.push(c as char);
+                                        
+                                        println!(" done {}", &buffer);
+                                        process.context.pc += 4;
+                                        process::switch_to_user(process);
+                                    }
+                                }
+                            }
+                        }
+                        other => panic!(
+                            "Unhandled External Interrupt cause: {}, code {}",
+                            cause, other
+                        ),
+                    }
+                }
+            },
             _ => {
                 panic!(
                     "Unhandled async trap CPU#{} -> {}\n",
@@ -183,6 +242,23 @@ pub fn tong_os_trap(process: &mut Process) {
                                 process::PROCESS_RUNNING.replace(running);
                                 process::switch_to_user(process::PROCESS_RUNNING.as_ref().unwrap());
                             }
+                        }
+                    }
+                    // syscall input keyboard
+                    4 => {
+                        unsafe {
+                            uart::READING = true;
+                            // UART
+                            plic::set_threshold(6);
+                            plic::set_priority(10, 7);
+                            plic::enable(10);
+
+                            // [11] = MEIE (Machine External Interrupt Enable)
+                            let flags = 1 << 11;
+                            asm!("csrw mie, {}", in(reg) flags);
+
+                            process.context.pc += 4;
+                            process::switch_to_user(process);
                         }
                     }
                     code => {

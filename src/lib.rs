@@ -14,7 +14,7 @@ extern crate alloc;
 use alloc::prelude::v1::*;
 
 pub const DEBUG_OUTPUT: bool = false;
-pub const ENABLE_PREEMPTION: bool = true;
+pub const ENABLE_PREEMPTION: bool = false;
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
@@ -72,6 +72,7 @@ pub mod cpu;
 pub mod kmem;
 pub mod lock;
 pub mod page;
+pub mod plic;
 pub mod process;
 pub mod scheduler;
 pub mod trap;
