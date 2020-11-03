@@ -58,6 +58,16 @@ use tong_os::assignment;
 
 
 
+fn example_process3(iteration: usize) {
+    println!("Counting for {}", iteration);
+    let mut my_counter = 0;
+    for _ in 0..iteration {
+        my_counter += 1;
+    }
+    println!("Ex3 counter = {}. Expected = {}", my_counter, iteration);
+    tong_os::process::exit();
+}
+    
 #[no_mangle]
 extern "C" fn kinit(_hartid: usize) -> ! {
     tong_os::uart::Uart::new(0x1000_0000).init();
