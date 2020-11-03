@@ -17,8 +17,6 @@ use tong_os::{print, println};
 #[macro_use]
 extern crate alloc;
 
-use alloc::prelude::v1::*;
-
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
     println!("Running {} tests", tests.len());
@@ -58,30 +56,7 @@ extern "C" fn abort() -> ! {
 use tong_os::assembly::*;
 use tong_os::assignment;
 
-fn example_process1(test: usize) -> () {
-    println!("YEAH, we're running as user with virtual address translation!");
-    println!("Arg: {}", test);
 
-    println!("exiting process");
-    tong_os::process::exit();
-}
-
-fn example_process2() -> () {
-    println!("EXAMPLE 2, ARE YOU READY??");
-
-    println!("exiting process");
-    tong_os::process::exit();
-}
-
-fn example_process3(iteration: usize) {
-    println!("Counting for {}", iteration);
-    let mut my_counter = 0;
-    for _ in 0..iteration {
-        my_counter += 1;
-    }
-    println!("Ex3 counter = {}. Expected = {}", my_counter, iteration);
-    tong_os::process::exit();
-}
 
 #[no_mangle]
 extern "C" fn kinit(_hartid: usize) -> ! {
@@ -122,20 +97,10 @@ extern "C" fn kinit(_hartid: usize) -> ! {
         "                |___/ ",
     ));
 
-    // let process = tong_os::process::Process::new(example_process1 as usize, 666);
-    // tong_os::process::process_list_add(process);
-    // let process = tong_os::process::Process::new(example_process2 as usize, 0);
-    // tong_os::process::process_list_add(process);
-    // let process = tong_os::process::Process::new(example_process3 as usize, 666);
-    // tong_os::process::process_list_add(process);
-    // let process = tong_os::process::Process::new(example_process3 as usize, 42);
-    // tong_os::process::process_list_add(process);
-    // let process = tong_os::process::Process::new(tong_os::app::philosopher::main as usize, 0);
-    // tong_os::process::process_list_add(process);
-    let process = tong_os::process::Process::new(tong_os::app::input_example::main as usize, 0);
-    tong_os::process::process_list_add(process);
+    println!("README was updated with new features! Did you read it?");
 
-    println!("scheduling!");
+    tong_os::assignment::choose_processes(tong_os::PROCESS_TO_RUN);
+
     if let Some(next_process) = tong_os::scheduler::schedule() {
         println!("switching to user ...");
         tong_os::trap::schedule_machine_timer_interrupt(next_process.quantum);

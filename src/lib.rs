@@ -8,13 +8,16 @@
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
 
-#[macro_use]
 extern crate alloc;
 
-use alloc::prelude::v1::*;
+// 1 = Simple example processess. 
+// 2 = Philosopher's Dinner;
+// 3 = Keyboard input app example.
+// 4 = All processess.
+pub const PROCESS_TO_RUN: usize = 2;
 
 pub const DEBUG_OUTPUT: bool = false;
-pub const ENABLE_PREEMPTION: bool = false;
+pub const ENABLE_PREEMPTION: bool = true;
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {

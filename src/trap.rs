@@ -76,54 +76,48 @@ pub fn tong_os_trap(process: &mut Process) {
                 }
             }
             11 => unsafe {
-                println!("trantando external interrupt");
+                debug!("Handling external interrupt!");
 
                 let buffer: &mut alloc::string::String =
                     core::mem::transmute(process.context.regs[GeneralPurposeRegister::A1 as usize]);
 
-                // let mut buffer = alloc::string::String::new();
 
-                println!("buffer: {}", buffer);
 
                 if let Some(external_interrupt) = plic::next() {
                     match external_interrupt {
                         // UART
                         10 => {
                             let mut uart = uart::Uart::new(0x1000_0000);
-                            println!("create uart");
 
                             if let Some(c) = uart.get() {
                                 match c {
                                     // backspace
-                                    8 => {
+                                    8 | 127 => {
                                         // remove last char from buffer
+                                        print!("{0} {0}", 8 as char);
                                         buffer.pop();
-                                        
-                                        process.context.pc += 4;
+                                        plic::complete(external_interrupt);
                                         process::switch_to_user(process);
                                     }
+                                    // Enter
                                     10 | 13 => {
-                                        // plic complete interrupt
-
-                                        
+                                        println!("");
+                                        uart::READING = false;
                                         plic::complete(external_interrupt);
 
                                         let flags = 1 << 7;
                                         asm!("csrw mie, {}", in(reg) flags);
 
-                                        uart::READING = false;
                                         
-                                        process.context.pc += 4;
                                         schedule_machine_timer_interrupt(process.quantum);
                                         process::switch_to_user(process);
                                     }
+                                    // Char
                                     _ => {
-                                        println!("pushing char: {}", c);
-                                        // add char in buffer
+                                        print!("{}", c as char);
                                         buffer.push(c as char);
-                                        
-                                        println!(" done {}", &buffer);
-                                        process.context.pc += 4;
+
+                                        plic::complete(external_interrupt);
                                         process::switch_to_user(process);
                                     }
                                 }
@@ -184,6 +178,7 @@ pub fn tong_os_trap(process: &mut Process) {
                         process.context.pc += 4;
                         process::switch_to_user(process);
                     }
+                    // Joining thread
                     2 => {
                         let joining_pid = process.context.regs[GeneralPurposeRegister::A1 as usize];
 

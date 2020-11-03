@@ -5,8 +5,6 @@
 
 use crate::process::{self, Process, ProcessState};
 
-// next_process = schedule()
-// switch_context(current_process, next_process)
 pub fn schedule() -> &'static Option<Process> {
     // Try to get process list reference
     debug!("SCHEDULING!");

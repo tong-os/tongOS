@@ -8,11 +8,13 @@
 #[derive(Clone, Copy)]
 enum MutexState {
     Unlocked = 0,
+    #[allow(dead_code)]
     Locked = 1,
 }
 
 #[derive(Clone, Copy)]
 pub struct Mutex {
+    #[allow(dead_code)]
     state: MutexState,
 }
 
