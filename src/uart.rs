@@ -8,6 +8,8 @@ use core::{
     fmt::{Error, Write},
 };
 
+pub static mut READING: bool = false;
+
 pub struct Uart {
     base_address: usize,
 }
