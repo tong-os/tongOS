@@ -5,7 +5,9 @@ global_asm!(include_str!("trap.S"));
 use crate::process::Process;
 
 extern "C" {
+    #[allow(improper_ctypes)]
     pub fn __tong_os_switch_to_user(trap_frame: &Process) -> !;
+
     pub fn __tong_os_trap() -> !;
 }
 

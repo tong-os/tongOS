@@ -152,7 +152,7 @@ impl Drop for Process {
     }
 }
 
-fn make_user_syscall(arg0: usize, arg1: usize, arg2: usize) {
+fn make_user_syscall(_arg0: usize, _arg1: usize, _arg2: usize) {
     unsafe {
         asm!("ECALL");
     }
@@ -190,6 +190,11 @@ pub fn join(pid: usize) {
 
 pub fn sleep(amount: usize) {
     make_user_syscall(3, amount, 0);
+}
+
+pub fn read_line(buffer: &mut alloc::string::String) {
+    make_user_syscall(4, buffer as *mut _ as usize, 0);
+    while unsafe { crate::uart::READING } {}
 }
 
 pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
