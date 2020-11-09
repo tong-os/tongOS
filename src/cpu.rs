@@ -138,10 +138,18 @@ pub fn disable_global_interrupts() {
 pub fn enable_global_interrupts() {
     println!("enable");
     unsafe {
-        let mstatus: usize;
-        asm!("csrr {}, mstatus", out(reg) mstatus);
+        // let mstatus: usize;
+        // asm!("csrr {}, mstatus", out(reg) mstatus);
         // [3] = MIE (Machine Interrupt Enable)
-        let mstatus = mstatus | (1 << 3);
+        let mstatus = 1 << 3;
         asm!("csrw mstatus, {}", in(reg) mstatus);
+    }
+}
+
+pub fn get_hartid() -> usize {
+    unsafe {
+        let hartid: usize;
+        asm!("csrr {}, mhartid", out(reg) hartid);
+        hartid
     }
 }

@@ -9,6 +9,7 @@ extern "C" {
     pub fn __tong_os_switch_to_user(trap_frame: &Process) -> !;
 
     pub fn __tong_os_trap() -> !;
+    pub fn __tong_os_trap2() -> !;
 }
 
 extern "C" {

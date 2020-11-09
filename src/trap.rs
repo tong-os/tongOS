@@ -5,21 +5,36 @@
 
 use crate::cpu::{self, GeneralPurposeRegister};
 use crate::plic;
-use crate::uart;
 use crate::process::{self, Process};
 use crate::scheduler::schedule;
+use crate::uart;
 
 pub fn init() {
     use crate::assembly::__tong_os_trap;
+
+    unsafe { asm!("csrw mtvec, {}", in(reg) (__tong_os_trap as usize)) }
 
     // configure mstatus
     // enable_global_interrupts();
 
     // [7] = MTIE (Machine Time Interrupt Enable)
-    let flags = 1 << 7;
+    let flags = 1 << 7 | 1 << 3;
     unsafe { asm!("csrw mie, {}", in(reg) flags) }
+}
 
-    unsafe { asm!("csrw mtvec, {}", in(reg) (__tong_os_trap as usize)) }
+fn send_software_interrupt(hartid: usize) {
+    let clint_base = 0x200_0000 as *mut u32;
+
+    unsafe {
+        clint_base.add(hartid).write_volatile(0x1);
+    }
+}
+
+pub fn wake_all_harts() {
+    for i in 1..4 {
+        println!("waking hart {}", i);
+        send_software_interrupt(i);
+    }
 }
 
 // CLINT Memory Map
@@ -54,6 +69,11 @@ pub fn tong_os_trap(process: &mut Process) {
 
     if is_async {
         match cause {
+            3 => {
+                println!("Handling asyng software interrupt on hart {}", cpu::get_hartid());
+                loop{
+                }
+            }
             7 => {
                 debug!(
                     "Handling async timer interrupt: mcause {}, pid {}",
@@ -81,8 +101,6 @@ pub fn tong_os_trap(process: &mut Process) {
                 let buffer: &mut alloc::string::String =
                     core::mem::transmute(process.context.regs[GeneralPurposeRegister::A1 as usize]);
 
-
-
                 if let Some(external_interrupt) = plic::next() {
                     match external_interrupt {
                         // UART
@@ -108,7 +126,6 @@ pub fn tong_os_trap(process: &mut Process) {
                                         let flags = 1 << 7;
                                         asm!("csrw mie, {}", in(reg) flags);
 
-                                        
                                         schedule_machine_timer_interrupt(process.quantum);
                                         process::switch_to_user(process);
                                     }

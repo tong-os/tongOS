@@ -237,7 +237,7 @@ SECTIONS
     When we go to allocate from the stack, we'll subtract the number of bytes we need.
   */
 
-  PROVIDE(_num_hart = 1);
+  PROVIDE(_num_hart = 4);
   PROVIDE(_stack_size = 0x8000);
   PROVIDE(_stack_start = _bss_end);
   PROVIDE(_stack_end = _stack_start + (_num_hart * _stack_size));

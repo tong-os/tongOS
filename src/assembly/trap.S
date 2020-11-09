@@ -63,10 +63,38 @@ __tong_os_trap:
     # load kernel stack
     la sp, _stack_end
 
-    # call trap handler
+    csrr t2, mhartid
+    li t0, 0
+    la t1, _stack_size
+_set_hart_stack_pointer:
+    beq t0, t2, _call_mtrap
+    sub sp, sp, t1
+    addi t0, t0, 1
+    j _set_hart_stack_pointer
+
+_call_mtrap:
     mv a0, t6
     call tong_os_trap
 
+
+.global __tong_os_trap2
+.align 4
+__tong_os_trap2:
+    # load kernel stack
+    la sp, _stack_end
+
+    csrr t2, mhartid
+    li t0, 0
+    la t1, _stack_size
+_set_hart_stack_pointer2:
+    beq t0, t2, _call_mtrap2
+    sub sp, sp, t1
+    addi t0, t0, 1
+    j _set_hart_stack_pointer2
+
+_call_mtrap2:
+    mv a0, t6
+    call tong_os_trap
 
 .global __tong_os_switch_to_user
 __tong_os_switch_to_user:

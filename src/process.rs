@@ -5,6 +5,7 @@
 
 use crate::assembly;
 use crate::cpu::{self, CpuMode, TrapFrame};
+use crate::lock::Mutex;
 use crate::page::{self, PageTableEntryFlags, Sv39PageTable};
 
 use alloc::collections::vec_deque::VecDeque;
@@ -13,6 +14,12 @@ pub static mut PROCESS_RUNNING: Option<Process> = None;
 pub static mut PROCESS_LIST: Option<VecDeque<Process>> = None;
 pub static mut NEXT_PID: usize = 0;
 pub static DEFAULT_QUANTUM: usize = 1;
+
+pub static mut PROCESS_LOCK: Mutex = Mutex::new();
+
+pub fn get_process_lock() -> &'static mut Mutex {
+    unsafe { &mut PROCESS_LOCK }
+}
 // Process States
 // Tanenbaum, Modern Operating Systems
 // Ready -> Running = picked by scheduler
@@ -46,6 +53,7 @@ pub struct Process {
 impl Process {
     pub fn new(start: usize, arg0: usize) -> Self {
         // cpu::disable_global_interrupts();
+        get_process_lock().spin_lock();
         let mut context = TrapFrame::new();
         context.pc = start as usize;
         context.mode = CpuMode::User as usize;
@@ -138,6 +146,7 @@ impl Process {
             blocking_pid: None,
             sleep_until: 0,
         };
+        get_process_lock().unlock();
         // cpu::enable_global_interrupts();
         proc
     }
@@ -281,4 +290,9 @@ pub fn print_process_list() {
             PROCESS_LIST.replace(process_list);
         }
     }
+}
+
+pub fn idle() {
+    println!("Idle running in hart {}.", cpu::get_hartid());
+    unsafe { asm!("wfi") }
 }
