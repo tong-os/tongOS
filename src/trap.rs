@@ -30,6 +30,14 @@ fn send_software_interrupt(hartid: usize) {
     }
 }
 
+fn complete_software_interrupt(hartid: usize) {
+    let clint_base = 0x200_0000 as *mut u32;
+
+    unsafe {
+        clint_base.add(hartid).write_volatile(0x0);
+    }
+}
+
 pub fn wake_all_harts() {
     for i in 1..4 {
         println!("waking hart {}", i);
@@ -45,7 +53,7 @@ pub const MMIO_MTIME: *const u64 = 0x0200_BFF8 as *const u64;
 pub fn schedule_machine_timer_interrupt(quantum: usize) {
     unsafe {
         if crate::ENABLE_PREEMPTION {
-            MMIO_MTIMECMP.write_volatile(
+            MMIO_MTIMECMP.add(cpu::get_hartid()).write_volatile(
                 MMIO_MTIME
                     .read_volatile()
                     .wrapping_add(cpu::CONTEXT_SWITCH_TIME * quantum as u64),
@@ -70,17 +78,32 @@ pub fn tong_os_trap(process: &mut Process) {
     if is_async {
         match cause {
             3 => {
-                println!("Handling asyng software interrupt on hart {}", cpu::get_hartid());
-                loop{
+                complete_software_interrupt(cpu::get_hartid());
+                cpu::disable_global_interrupts();
+                init();
+                println!(
+                    "Handling asyng software interrupt on hart {}",
+                    cpu::get_hartid()
+                );
+
+                if cpu::get_hartid() == 1 {
+                    if let Some(next_process) = schedule() {
+                        schedule_machine_timer_interrupt(next_process.quantum);
+                        process::switch_to_user(&next_process);
+                    }
                 }
+
+                loop {}
             }
             7 => {
+                crate::get_print_lock().unlock();
                 debug!(
                     "Handling async timer interrupt: mcause {}, pid {}",
                     cause, process.pid
                 );
                 unsafe {
-                    let mut old_process = process::PROCESS_RUNNING.take().unwrap();
+                    let mut old_process =
+                        process::PROCESS_RUNNING[cpu::get_hartid()].take().unwrap();
                     old_process.state = process::ProcessState::Ready;
                     process::process_list_add(old_process);
                     if let Some(next_process) = schedule() {
@@ -202,7 +225,9 @@ pub fn tong_os_trap(process: &mut Process) {
                         // if joining pid has already exited
                         if !process::process_list_contains(joining_pid) {
                             // add runnign to proc list as readdy and schedule
-                            let mut running = unsafe { process::PROCESS_RUNNING.take().unwrap() };
+                            let mut running = unsafe {
+                                process::PROCESS_RUNNING[cpu::get_hartid()].take().unwrap()
+                            };
                             running.state = process::ProcessState::Ready;
                             running.context.pc += 4;
                             process::process_list_add(running);
@@ -213,7 +238,9 @@ pub fn tong_os_trap(process: &mut Process) {
                                 panic!("Joining non existent process failure");
                             }
                         } else {
-                            let mut running = unsafe { process::PROCESS_RUNNING.take().unwrap() };
+                            let mut running = unsafe {
+                                process::PROCESS_RUNNING[cpu::get_hartid()].take().unwrap()
+                            };
                             running.state = process::ProcessState::Blocked;
                             running.context.pc += 4;
                             let blocking_pid = running.pid;
@@ -229,7 +256,8 @@ pub fn tong_os_trap(process: &mut Process) {
                     }
                     // syscall sleep
                     3 => {
-                        let mut running = unsafe { process::PROCESS_RUNNING.take().unwrap() };
+                        let mut running =
+                            unsafe { process::PROCESS_RUNNING[cpu::get_hartid()].take().unwrap() };
                         let amount = running.context.regs[GeneralPurposeRegister::A1 as usize];
                         running.sleep_until = unsafe {
                             MMIO_MTIME.read_volatile() as usize
@@ -251,8 +279,12 @@ pub fn tong_os_trap(process: &mut Process) {
                             unsafe {
                                 while (MMIO_MTIME.read_volatile() as usize) < running.sleep_until {}
                                 running.state = process::ProcessState::Running;
-                                process::PROCESS_RUNNING.replace(running);
-                                process::switch_to_user(process::PROCESS_RUNNING.as_ref().unwrap());
+                                process::PROCESS_RUNNING[cpu::get_hartid()].replace(running);
+                                process::switch_to_user(
+                                    process::PROCESS_RUNNING[cpu::get_hartid()]
+                                        .as_ref()
+                                        .unwrap(),
+                                );
                             }
                         }
                     }

@@ -108,12 +108,11 @@ extern "C" fn kinit(hartid: usize) -> ! {
 
         println!("README was updated with new features! Did you read it?");
 
-        tong_os::trap::wake_all_harts();
-
         tong_os::assignment::choose_processes(tong_os::PROCESS_TO_RUN);
 
+        tong_os::trap::wake_all_harts();
+
         if let Some(next_process) = tong_os::scheduler::schedule() {
-            println!("switching to user ...");
             tong_os::trap::schedule_machine_timer_interrupt(next_process.quantum);
             tong_os::process::switch_to_user(&next_process);
         }
@@ -126,10 +125,8 @@ extern "C" fn kinit(hartid: usize) -> ! {
         unsafe { asm!("csrw mie, {}", in(reg) flags) }
 
         println!("hart {} will wait", hartid);
-        unsafe {
-            asm!("wfi");
+        loop {
+            unsafe { asm!("wfi") }
         }
-        println!("never hart {} will wait", hartid);
-        loop {}
     }
 }

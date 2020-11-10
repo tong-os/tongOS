@@ -10,8 +10,10 @@ use crate::page::{self, PageTableEntryFlags, Sv39PageTable};
 
 use alloc::collections::vec_deque::VecDeque;
 
-pub static mut PROCESS_RUNNING: Option<Process> = None;
+pub static mut PROCESS_RUNNING: [Option<Process>; 4] = [None, None, None, None];
 pub static mut PROCESS_LIST: Option<VecDeque<Process>> = None;
+pub static mut PROCESS_LIST_LOCK: Mutex = Mutex::new();
+
 pub static mut NEXT_PID: usize = 0;
 pub static DEFAULT_QUANTUM: usize = 1;
 
@@ -20,6 +22,11 @@ pub static mut PROCESS_LOCK: Mutex = Mutex::new();
 pub fn get_process_lock() -> &'static mut Mutex {
     unsafe { &mut PROCESS_LOCK }
 }
+
+pub fn get_process_list_lock() -> &'static mut Mutex {
+    unsafe { &mut PROCESS_LIST_LOCK }
+}
+
 // Process States
 // Tanenbaum, Modern Operating Systems
 // Ready -> Running = picked by scheduler
@@ -180,7 +187,7 @@ pub fn exit() {
     unsafe {
         debug!(
             "exiting from pid: {}",
-            PROCESS_RUNNING.as_ref().unwrap().pid
+            PROCESS_RUNNING[cpu::get_hartid()].as_ref().unwrap().pid
         );
     }
     make_user_syscall(0, 0, 0);
@@ -190,7 +197,7 @@ pub fn join(pid: usize) {
     unsafe {
         debug!(
             "Join running.pid: {}, waiting pid {}",
-            PROCESS_RUNNING.as_ref().unwrap().pid,
+            PROCESS_RUNNING[cpu::get_hartid()].as_ref().unwrap().pid,
             pid
         );
     }
@@ -207,6 +214,7 @@ pub fn read_line(buffer: &mut alloc::string::String) {
 }
 
 pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
+    get_process_list_lock().spin_lock();
     if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
         for process in &mut process_list {
             if process.pid == pid {
@@ -217,9 +225,11 @@ pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
             PROCESS_LIST.replace(process_list);
         }
     }
+    get_process_list_lock().unlock();
 }
 
 pub fn wake_process(blocked_pid: usize) {
+    get_process_list_lock().spin_lock();
     if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
         for process in &mut process_list {
             if process.pid == blocked_pid {
@@ -230,9 +240,11 @@ pub fn wake_process(blocked_pid: usize) {
             PROCESS_LIST.replace(process_list);
         }
     }
+    get_process_list_lock().unlock();
 }
 
 pub fn process_list_add(process: Process) {
+    get_process_list_lock().spin_lock();
     if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
         process_list.push_back(process);
 
@@ -248,9 +260,11 @@ pub fn process_list_add(process: Process) {
             PROCESS_LIST.replace(process_list);
         }
     }
+    get_process_list_lock().unlock();
 }
 
 pub fn process_list_remove(pid: usize) {
+    get_process_list_lock().spin_lock();
     if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
         if let Some(position) = process_list.iter().position(|process| process.pid == pid) {
             process_list.remove(position);
@@ -260,9 +274,11 @@ pub fn process_list_remove(pid: usize) {
             PROCESS_LIST.replace(process_list);
         }
     }
+    get_process_list_lock().unlock();
 }
 
 pub fn process_list_contains(pid: usize) -> bool {
+    get_process_list_lock().spin_lock();
     let mut contains = false;
     if let Some(process_list) = unsafe { PROCESS_LIST.take() } {
         if let Some(_) = process_list.iter().position(|process| process.pid == pid) {
@@ -273,10 +289,12 @@ pub fn process_list_contains(pid: usize) -> bool {
             PROCESS_LIST.replace(process_list);
         }
     }
+    get_process_list_lock().unlock();
     contains
 }
 
 pub fn switch_to_user(process: &Process) -> ! {
+    println!("switching to user for hart {} pid {}...", cpu::get_hartid(), process.pid);
     debug!("switch_to_user: {}", process.pid);
     unsafe { assembly::__tong_os_switch_to_user(process) }
 }

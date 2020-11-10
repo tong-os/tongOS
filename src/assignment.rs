@@ -43,9 +43,23 @@ pub fn print_sections() {
 
 use crate::process;
 
+fn some_math(n: usize) {
+    let mut sum = 0;
+    for i in 0..n {
+        for j in 0..n {
+            for k in 0..n {
+                sum += i * j + 6 * k;
+            }
+        }
+    }
+}
+
 pub fn example_process1(test: usize) -> () {
     println!("Example process 1");
     println!("YEAH, we're running as user with virtual address translation!");
+
+    // some_math(100);
+
     println!("Arg: {}", test);
 
     println!("exiting process");
@@ -55,12 +69,17 @@ pub fn example_process1(test: usize) -> () {
 pub fn example_process2() -> () {
     println!("EXAMPLE 2, ARE YOU READY??");
 
+    // some_math(100);
+
     println!("exiting process");
     process::exit();
 }
 
 pub fn example_process3(iteration: usize) {
     println!("Example process 3!");
+
+    // some_math(100);
+
     println!("Counting for {}", iteration);
     let mut my_counter = 0;
     for _ in 0..iteration {
@@ -91,9 +110,13 @@ pub fn choose_processes(process_to_run: usize) {
             process::process_list_add(process);
         }
         4 => {
-            choose_processes(1);
-            choose_processes(3);
+            // choose_processes(1);
+            // choose_processes(3);
+            let process = process::Process::new(example_process1 as usize, 666);
+            process::process_list_add(process);
             choose_processes(2);
+            let process = process::Process::new(example_process2 as usize, 0);
+            process::process_list_add(process);
         }
         _ => {
             println!("Process not found!");
