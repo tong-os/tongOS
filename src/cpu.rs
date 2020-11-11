@@ -97,7 +97,7 @@ pub struct TrapFrame {
     pub fregs: [usize; 32],
     pub satp: usize,
     pub pc: usize,
-    pub hartid: usize,
+    pub global_interrupt_enable: usize,
     pub mode: usize,
 }
 
@@ -108,7 +108,7 @@ impl TrapFrame {
             fregs: [0; 32],
             satp: 0,
             pc: 0,
-            hartid: 0,
+            global_interrupt_enable: 0,
             mode: 0,
         }
     }

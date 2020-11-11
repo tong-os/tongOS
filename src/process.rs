@@ -19,12 +19,20 @@ pub static DEFAULT_QUANTUM: usize = 1;
 
 pub static mut PROCESS_LOCK: Mutex = Mutex::new();
 
+pub static mut PROCESS_IDLE: [Option<Process>; 4] = [None, None, None, None];
+
 pub fn get_process_lock() -> &'static mut Mutex {
     unsafe { &mut PROCESS_LOCK }
 }
 
 pub fn get_process_list_lock() -> &'static mut Mutex {
     unsafe { &mut PROCESS_LIST_LOCK }
+}
+
+pub fn init() {
+    for process in unsafe { &mut PROCESS_IDLE } {
+        process.replace(Process::new_idle());
+    }
 }
 
 // Process States
@@ -155,6 +163,35 @@ impl Process {
         };
         get_process_lock().unlock();
         // cpu::enable_global_interrupts();
+        proc
+    }
+
+    pub fn new_idle() -> Self {
+        get_process_lock().spin_lock();
+        let mut context = TrapFrame::new();
+        context.pc = self::idle as usize;
+        context.mode = CpuMode::Machine as usize;
+        context.global_interrupt_enable = 1 << 7;
+
+        let num_stack_pages = 2;
+        let stack = page::zalloc(num_stack_pages) as usize;
+        let stack_end = stack + num_stack_pages * page::PAGE_SIZE;
+
+        context.regs[cpu::GeneralPurposeRegister::Sp as usize] = stack_end;
+
+        let proc = Process {
+            context,
+            stack: stack as *mut u8,
+            state: ProcessState::Ready,
+            page_table: 0 as *mut _,
+            quantum: DEFAULT_QUANTUM,
+            pid: core::usize::MAX,
+            blocking_pid: None,
+            sleep_until: 0,
+        };
+
+        get_process_lock().unlock();
+
         proc
     }
 }
@@ -294,7 +331,11 @@ pub fn process_list_contains(pid: usize) -> bool {
 }
 
 pub fn switch_to_user(process: &Process) -> ! {
-    println!("switching to user for hart {} pid {}...", cpu::get_hartid(), process.pid);
+    // println!(
+    //     "switching to user for hart {} pid {}...",
+    //     cpu::get_hartid(),
+    //     process.pid
+    // );
     debug!("switch_to_user: {}", process.pid);
     unsafe { assembly::__tong_os_switch_to_user(process) }
 }
@@ -311,6 +352,7 @@ pub fn print_process_list() {
 }
 
 pub fn idle() {
-    println!("Idle running in hart {}.", cpu::get_hartid());
-    unsafe { asm!("wfi") }
+    loop {
+        unsafe { asm!("wfi") }
+    }
 }

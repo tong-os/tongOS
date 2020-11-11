@@ -80,20 +80,16 @@ pub fn tong_os_trap(process: &mut Process) {
             3 => {
                 complete_software_interrupt(cpu::get_hartid());
                 cpu::disable_global_interrupts();
-                init();
+                self::init();
                 println!(
                     "Handling asyng software interrupt on hart {}",
                     cpu::get_hartid()
                 );
 
-                if cpu::get_hartid() == 1 {
-                    if let Some(next_process) = schedule() {
-                        schedule_machine_timer_interrupt(next_process.quantum);
-                        process::switch_to_user(&next_process);
-                    }
+                if let Some(next_process) = schedule() {
+                    schedule_machine_timer_interrupt(next_process.quantum);
+                    process::switch_to_user(&next_process);
                 }
-
-                loop {}
             }
             7 => {
                 crate::get_print_lock().unlock();
@@ -102,10 +98,12 @@ pub fn tong_os_trap(process: &mut Process) {
                     cause, process.pid
                 );
                 unsafe {
-                    let mut old_process =
-                        process::PROCESS_RUNNING[cpu::get_hartid()].take().unwrap();
-                    old_process.state = process::ProcessState::Ready;
-                    process::process_list_add(old_process);
+                    if process.pid != core::usize::MAX {
+                        let mut old_process =
+                            process::PROCESS_RUNNING[cpu::get_hartid()].take().unwrap();
+                        old_process.state = process::ProcessState::Ready;
+                        process::process_list_add(old_process);
+                    }
                     if let Some(next_process) = schedule() {
                         debug!(
                             "interrupt process {}, pc={:x}",
@@ -173,7 +171,8 @@ pub fn tong_os_trap(process: &mut Process) {
             _ => {
                 panic!(
                     "Unhandled async trap CPU#{} -> {}\n",
-                    process.context.hartid, cause
+                    cpu::get_hartid(),
+                    cause
                 );
             }
         }
@@ -317,7 +316,9 @@ pub fn tong_os_trap(process: &mut Process) {
                 }
                 panic!(
                     "Unhandled sync trap CPU#{} -> cause: {}; mval: {:x?}\n",
-                    process.context.hartid, cause, mtval
+                    cpu::get_hartid(),
+                    cause,
+                    mtval
                 );
             }
         }

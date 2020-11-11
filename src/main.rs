@@ -92,6 +92,9 @@ extern "C" fn kinit(hartid: usize) -> ! {
         println!("setup trap");
         tong_os::trap::init();
 
+        println!("Init process");
+        tong_os::process::init();
+
         println!("Finished!");
 
         println!("You are now in ...");
@@ -118,11 +121,12 @@ extern "C" fn kinit(hartid: usize) -> ! {
         }
         loop {}
     } else {
-        tong_os::cpu::enable_global_interrupts();
-        unsafe { asm!("csrw mtvec, {}", in(reg) (__tong_os_trap2 as usize)) }
+        unsafe { asm!("csrw mtvec, {}", in(reg) (__tong_os_trap_from_machine as usize)) }
 
         let flags = 1 << 3;
         unsafe { asm!("csrw mie, {}", in(reg) flags) }
+
+        tong_os::cpu::enable_global_interrupts();
 
         println!("hart {} will wait", hartid);
         loop {

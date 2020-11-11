@@ -4,7 +4,7 @@
 # Stephen Marz
 # tongOs team
 
-.section .text.tongos
+.section .text.tongos.trap
 .option norvc
 
 .global __tong_os_trap
@@ -77,22 +77,22 @@ _call_mtrap:
     call tong_os_trap
 
 
-.global __tong_os_trap2
+.global __tong_os_trap_from_machine
 .align 4
-__tong_os_trap2:
+__tong_os_trap_from_machine:
     # load kernel stack
     la sp, _stack_end
 
     csrr t2, mhartid
     li t0, 0
     la t1, _stack_size
-_set_hart_stack_pointer2:
-    beq t0, t2, _call_mtrap2
+1:
+    beq t0, t2, 1f
     sub sp, sp, t1
     addi t0, t0, 1
-    j _set_hart_stack_pointer2
+    j 1b
 
-_call_mtrap2:
+1:
     mv a0, t6
     call tong_os_trap
 
@@ -110,13 +110,13 @@ __tong_os_switch_to_user:
     ld a2, 64*8(a0)
     # Load processor mode
     ld a3, 67*8(a0)
+    # Load global interrupt enable
+    ld a4, 66*8(a0)
 
-    # enable machine interruptions
-    li t0, 0
     # shift mode to correct place
     slli  a3, a3, 11
     # merge flags and mode
-    or    t0, t0, a3
+    or    t0, a4, a3
     # write to mstatus
     csrw  mstatus, t0
 

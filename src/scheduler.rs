@@ -3,8 +3,8 @@
 // Stephen Marz
 // tongOs team
 
-use crate::process::{self, Process, ProcessState};
 use crate::cpu;
+use crate::process::{self, Process, ProcessState};
 
 pub fn schedule() -> &'static Option<Process> {
     // Try to get process list reference
@@ -12,6 +12,21 @@ pub fn schedule() -> &'static Option<Process> {
     // process::print_process_list();
     unsafe {
         process::get_process_list_lock().spin_lock();
+        if process::PROCESS_LIST.as_ref().unwrap().is_empty() {
+            println!("empty process list");
+            let mut all_none = true;
+            for process in process::PROCESS_RUNNING.as_ref().iter() {
+                if let Some(proc) = process {
+                    println!("pid : {}", proc.pid);
+                    all_none = false;
+                    break;
+                }
+            }
+            if all_none {
+                process::get_process_list_lock().unlock();
+                panic!("Shutting down hart {}, no more process.", cpu::get_hartid());
+            }
+        }
         if let Some(mut process_list) = process::PROCESS_LIST.take() {
             loop {
                 // Get first process
@@ -47,8 +62,10 @@ pub fn schedule() -> &'static Option<Process> {
                         }
                     }
                 } else {
+                    process::PROCESS_LIST.replace(process_list);
                     process::get_process_list_lock().unlock();
-                    panic!("No more processes for hart {}! Shutting down...", cpu::get_hartid());
+                    // println!("schedule idel on hart {}", cpu::get_hartid());
+                    return &process::PROCESS_IDLE[cpu::get_hartid()];
                 }
             }
         }
