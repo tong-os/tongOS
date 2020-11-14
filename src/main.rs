@@ -30,16 +30,15 @@ extern "C" fn eh_personality() {}
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    print!("Aborting: ");
     if let Some(p) = info.location() {
         println!(
-            "line {}, file {}: {}",
+            "Aborting: line {}, file {}: {}",
             p.line(),
             p.file(),
             info.message().unwrap()
         );
     } else {
-        println!("no information available.");
+        println!("Aborting: no information available.");
     }
     abort();
 }
