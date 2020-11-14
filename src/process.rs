@@ -13,6 +13,8 @@ use alloc::collections::vec_deque::VecDeque;
 pub static mut PROCESS_RUNNING: [Option<Process>; 4] = [None, None, None, None];
 pub static mut PROCESS_LIST: Option<VecDeque<Process>> = None;
 pub static mut PROCESS_LIST_LOCK: Mutex = Mutex::new();
+pub static mut PID_LIST: Option<VecDeque<usize>> = None;
+pub static mut PID_LIST_LOCK: Mutex = Mutex::new();
 
 pub static mut NEXT_PID: usize = 0;
 pub static DEFAULT_QUANTUM: usize = 1;
@@ -27,6 +29,10 @@ pub fn get_process_lock() -> &'static mut Mutex {
 
 pub fn get_process_list_lock() -> &'static mut Mutex {
     unsafe { &mut PROCESS_LIST_LOCK }
+}
+
+pub fn get_pid_list_lock() -> &'static mut Mutex {
+    unsafe { &mut PID_LIST_LOCK }
 }
 
 pub fn init() {
@@ -162,6 +168,8 @@ impl Process {
             sleep_until: 0,
         };
         get_process_lock().unlock();
+
+        pid_list_add(pid);
         // cpu::enable_global_interrupts();
         proc
     }
@@ -300,6 +308,40 @@ pub fn process_list_add(process: Process) {
     get_process_list_lock().unlock();
 }
 
+pub fn pid_list_add(pid: usize) {
+    get_pid_list_lock().spin_lock();
+    if let Some(mut pid_list) = unsafe { PID_LIST.take() } {
+        pid_list.push_back(pid);
+
+        unsafe {
+            PID_LIST.replace(pid_list);
+        }
+    } else {
+        let mut pid_list = VecDeque::new();
+
+        pid_list.push_back(pid);
+
+        unsafe {
+            PID_LIST.replace(pid_list);
+        }
+    }
+    get_pid_list_lock().unlock();
+}
+
+pub fn pid_list_remove(removing_pid: usize) {
+    get_pid_list_lock().spin_lock();
+    if let Some(mut pid_list) = unsafe { PID_LIST.take() } {
+        if let Some(position) = pid_list.iter().position(|pid| pid == &removing_pid) {
+            pid_list.remove(position);
+        }
+
+        unsafe {
+            PID_LIST.replace(pid_list);
+        }
+    }
+    get_pid_list_lock().unlock();
+}
+
 pub fn process_list_remove(pid: usize) {
     get_process_list_lock().spin_lock();
     if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
@@ -330,13 +372,28 @@ pub fn process_list_contains(pid: usize) -> bool {
     contains
 }
 
+pub fn pid_list_contains(checking_pid: usize) -> bool {
+    get_pid_list_lock().spin_lock();
+    let mut contains = false;
+    if let Some(pid_list) = unsafe { PID_LIST.take() } {
+        if let Some(_) = pid_list.iter().position(|pid| pid == &checking_pid) {
+            contains = true;
+        }
+
+        unsafe {
+            PID_LIST.replace(pid_list);
+        }
+    }
+    get_pid_list_lock().unlock();
+    contains
+}
+
 pub fn switch_to_user(process: &Process) -> ! {
-    // println!(
-    //     "switching to user for hart {} pid {}...",
-    //     cpu::get_hartid(),
-    //     process.pid
-    // );
-    debug!("switch_to_user: {}", process.pid);
+    debug!(
+        "switching to user for hart {} pid {}...",
+        cpu::get_hartid(),
+        process.pid
+    );
     unsafe { assembly::__tong_os_switch_to_user(process) }
 }
 

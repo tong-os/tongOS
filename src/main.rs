@@ -56,16 +56,6 @@ extern "C" fn abort() -> ! {
 use tong_os::assembly::*;
 use tong_os::assignment;
 
-fn example_process3(iteration: usize) {
-    println!("Counting for {}", iteration);
-    let mut my_counter = 0;
-    for _ in 0..iteration {
-        my_counter += 1;
-    }
-    println!("Ex3 counter = {}. Expected = {}", my_counter, iteration);
-    tong_os::process::exit();
-}
-
 #[no_mangle]
 extern "C" fn kinit(hartid: usize) -> ! {
     if hartid == 0 {

@@ -40,7 +40,7 @@ fn complete_software_interrupt(hartid: usize) {
 
 pub fn wake_all_harts() {
     for i in 1..4 {
-        println!("waking hart {}", i);
+        debug!("waking hart {}", i);
         send_software_interrupt(i);
     }
 }
@@ -81,7 +81,7 @@ pub fn tong_os_trap(process: &mut Process) {
                 complete_software_interrupt(cpu::get_hartid());
                 cpu::disable_global_interrupts();
                 self::init();
-                println!(
+                debug!(
                     "Handling asyng software interrupt on hart {}",
                     cpu::get_hartid()
                 );
@@ -92,7 +92,7 @@ pub fn tong_os_trap(process: &mut Process) {
                 }
             }
             7 => {
-                crate::get_print_lock().unlock();
+                // crate::get_print_lock().unlock();
                 debug!(
                     "Handling async timer interrupt: mcause {}, pid {}",
                     cause, process.pid
@@ -193,6 +193,7 @@ pub fn tong_os_trap(process: &mut Process) {
                         if let Some(blocked_pid) = process.blocking_pid {
                             process::wake_process(blocked_pid);
                         }
+                        process::pid_list_remove(process.pid);
 
                         if let Some(next_process) = schedule() {
                             debug!(
@@ -222,7 +223,9 @@ pub fn tong_os_trap(process: &mut Process) {
                         let joining_pid = process.context.regs[GeneralPurposeRegister::A1 as usize];
 
                         // if joining pid has already exited
-                        if !process::process_list_contains(joining_pid) {
+                        if !process::process_list_contains(joining_pid)
+                            && !process::pid_list_contains(joining_pid)
+                        {
                             // add runnign to proc list as readdy and schedule
                             let mut running = unsafe {
                                 process::PROCESS_RUNNING[cpu::get_hartid()].take().unwrap()
