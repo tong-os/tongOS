@@ -29,6 +29,13 @@ pub fn disable_machine_timer_interrupt() {
     unsafe { asm!("csrw mie, {}", in(reg) flags & flags_mask) }
 }
 
+pub fn enable_machine_timer_interrupt() {
+    let flags: usize;
+    unsafe { asm!("csrr {}, mie", out(reg) flags) }
+    let flags_mask = 1 << 7;
+    unsafe { asm!("csrw mie, {}", in(reg) flags | flags_mask) }
+}
+
 fn send_software_interrupt(hartid: usize) {
     let clint_base = 0x200_0000 as *mut u32;
 
@@ -46,9 +53,11 @@ fn complete_software_interrupt(hartid: usize) {
 }
 
 pub fn wake_all_harts() {
-    for i in 1..4 {
-        println!("waking hart {}", i);
-        send_software_interrupt(i);
+    for i in 0..4 {
+        if i != cpu::get_mhartid() {
+            println!("waking hart {}", i);
+            send_software_interrupt(i);
+        }
     }
 }
 
@@ -90,17 +99,18 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
     if is_async {
         match cause {
             3 => {
+                complete_software_interrupt(cpu::get_mhartid());
                 println!(
                     "Handling asyng software interrupt on hart {}",
                     cpu::get_mhartid()
                 );
-
-                loop {}
+                enable_machine_timer_interrupt();
+                scheduler::schedule();
             }
             7 => {
-                crate::get_print_lock().unlock();
                 debug!(
-                    "Handling async timer interrupt: mcause {}, pid {}",
+                    "Handling async timer interrupt on hart {}: mcause {}, pid {}",
+                    cpu::get_mhartid(),
                     cause,
                     process::get_running_process_pid().unwrap()
                 );
@@ -207,6 +217,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                                 new_process_pid;
                             (*trap_frame).pc += 4;
                         }
+                        // wake_all_harts();
                         process::switch_to_process(trap_frame);
                     }
                     // Joining thread

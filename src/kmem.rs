@@ -3,10 +3,17 @@
 // Stephen Marz
 // tongOS team
 
+use crate::lock::Mutex;
 use crate::page;
 
 static mut KMEM_ALLOC: usize = 0;
 static mut KMEM_HEAD: *mut KernelPageDescriptor = core::ptr::null_mut();
+
+static mut KMEM_LOCK: Mutex = Mutex::new();
+
+fn get_kmem_lock() -> &'static mut Mutex {
+    unsafe { &mut KMEM_LOCK }
+}
 
 #[repr(usize)]
 pub enum KernelPageDescriptorFlags {
@@ -201,13 +208,18 @@ unsafe impl GlobalAlloc for OsGlobalAlloc {
         // We align to the next page size so that when
         // we divide by PAGE_SIZE, we get exactly the number
         // of pages necessary.
-        kzmalloc(layout.size())
+        get_kmem_lock().try_lock();
+        let result = kzmalloc(layout.size());
+        get_kmem_lock().unlock();
+        result
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
         // We ignore layout since our allocator uses ptr_start -> last
         // to determine the span of an allocation.
+        get_kmem_lock().try_lock();
         kfree(ptr);
+        get_kmem_lock().unlock();
     }
 }
 

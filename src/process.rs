@@ -71,7 +71,6 @@ pub struct Process {
 
 impl Process {
     pub fn new(start: usize, arg0: usize) -> Self {
-        // cpu::disable_global_interrupts();
         get_process_lock().spin_lock();
 
         let pid = unsafe {
@@ -173,7 +172,6 @@ impl Process {
             sleep_until: 0,
         };
         get_process_lock().unlock();
-        // cpu::enable_global_interrupts();
         proc
     }
 

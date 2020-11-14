@@ -9,7 +9,7 @@ use crate::trap;
 
 pub fn schedule() -> ! {
     unsafe {
-        debug!("try schedule hart {}", cpu::get_mhartid());
+        debug!("running schedule on hart {}", cpu::get_mhartid());
         process::get_process_list_lock().spin_lock();
         if process::PROCESS_LIST.as_ref().unwrap().is_empty() {
             process::get_process_list_lock().unlock();
