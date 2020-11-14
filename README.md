@@ -52,7 +52,7 @@ A inicialização das outras harts já era feito anteriormente no processo de `b
 
 As operações atômicas ocorrem em todo o sistema, utilizando-se da implementação de Mutex, em `lock.rs`. O maior uso delas consiste na lista de processos, já que seria inviável uma execução correta sem atomicidade no seu acesso.
 
-Adicionamos o tratamento de interrupção de software para lidar com o setup inicial das harts diferentes de 0. Nesse sentido, as harts, ao não encontrarem nenhum processo disponível para escalonamento, executarão o processo `IDLE`. A cada interrupção de relógio, as harts checam no escalonador se existe algum processo disponível.
+Adicionamos o tratamento de interrupção de software para lidar com o setup inicial das harts diferentes de 0. Nesse sentido, as harts, ao não encontrarem nenhum processo disponível para escalonamento, executarão o processo `IDLE`. A cada interrupção de relógio, as harts checam no escalonador se existe algum processo disponível. Como cada hart contém seu próprio `MTIMECMP`, as interrupções são escalonadas em seu respectivo registrador (`schedule_machine_timer_interrupt` em `trap.rs`).
 
 O escalonador funciona para todas as harts com preempção ligada (default do sistema). 
 
