@@ -1,5 +1,7 @@
 use crate::lock::Mutex;
 use crate::process;
+use alloc::format;
+use alloc::string::String;
 
 const ITERATIONS: isize = 3;
 const NUM_PHILOSOPHERS: isize = 5;
@@ -19,26 +21,38 @@ pub unsafe fn philosopher_dinner(n: isize) {
 
     for i in (0..=ITERATIONS).rev() {
         TABLE.spin_lock();
-        println!("Philosopher {} is thinking. Iteration={}", n, i);
+        process::print_line(&String::from(format!(
+            "Philosopher {} is thinking. Iteration={}",
+            n, i
+        )));
         TABLE.unlock();
 
         process::sleep(SLEEP_TIME);
 
         TABLE.spin_lock();
-        println!("Philosopher {} is hungry. Iteration={}", n, i);
+        process::print_line(&String::from(format!(
+            "Philosopher {} is hungry. Iteration={}",
+            n, i
+        )));
         TABLE.unlock();
 
         CHOPSTICK[first as usize].spin_lock();
         CHOPSTICK[second as usize].spin_lock();
 
         TABLE.spin_lock();
-        println!("Philosopher {} is eating. Iteration={}", n, i);
+        process::print_line(&String::from(format!(
+            "Philosopher {} is eating. Iteration={}",
+            n, i
+        )));
         TABLE.unlock();
 
         process::sleep(SLEEP_TIME);
 
         TABLE.spin_lock();
-        println!("Philosopher {} is sate. Iteration={}", n, i);
+        process::print_line(&String::from(format!(
+            "Philosopher {} is sate. Iteration={}",
+            n, i
+        )));
         TABLE.unlock();
 
         CHOPSTICK[first as usize].unlock();
@@ -46,27 +60,27 @@ pub unsafe fn philosopher_dinner(n: isize) {
     }
 
     TABLE.spin_lock();
-    println!("Philosopher {} is done!", { n });
+    process::print_line(&String::from(format!("Philosopher {} is done!", { n })));
     TABLE.unlock();
 
     process::exit();
 }
 
 pub unsafe fn main() {
-    println!("The Philosopher's Dinner!");
+    process::print_line(&String::from("The Philosopher's Dinner!"));
 
     TABLE.spin_lock();
 
     let mut philosopher = [0; NUM_PHILOSOPHERS as usize];
 
     for i in 0..NUM_PHILOSOPHERS {
-        println!("Creating philosopher: {}", i);
+        process::print_line(&String::from(format!("Creating philosopher: {}", i)));
         philosopher[i as usize] = process::create_thread(philosopher_dinner as usize, i as usize);
     }
 
-    println!("Philosophers are alive and hungry!");
+    process::print_line(&String::from("Philosophers are alive and hungry!"));
 
-    println!("The dinner is served ...");
+    process::print_line(&String::from("The dinner is served ..."));
     TABLE.unlock();
 
     for i in 0..NUM_PHILOSOPHERS {
@@ -74,10 +88,13 @@ pub unsafe fn main() {
         process::join(pid);
 
         TABLE.spin_lock();
-        println!("Philosopher {} ate {} times!", i, ITERATIONS);
+        process::print_line(&String::from(format!(
+            "Philosopher {} ate {} times!",
+            i, ITERATIONS
+        )));
         TABLE.unlock();
     }
 
-    println!("Finished philosophers dinner!");
+    process::print_line(&String::from("Finished philosophers dinner!"));
     process::exit();
 }

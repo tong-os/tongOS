@@ -2,14 +2,13 @@ global_asm!(include_str!("entry.S"));
 global_asm!(include_str!("memory.S"));
 global_asm!(include_str!("trap.S"));
 
-use crate::process::Process;
+use crate::cpu::TrapFrame;
 
 extern "C" {
     #[allow(improper_ctypes)]
-    pub fn __tong_os_switch_to_user(trap_frame: &Process) -> !;
+    pub fn __tong_os_switch_to_process(process: *const TrapFrame) -> !;
 
-    pub fn __tong_os_trap() -> !;
-    pub fn __tong_os_trap_from_machine() -> !;
+    pub fn __tong_os_trap_machine_mode() -> !;
 }
 
 extern "C" {

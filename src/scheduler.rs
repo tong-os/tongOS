@@ -4,72 +4,105 @@
 // tongOs team
 
 use crate::cpu;
-use crate::process::{self, Process, ProcessState};
+use crate::process::{self, ProcessState};
+use crate::trap;
 
-pub fn schedule() -> &'static Option<Process> {
-    // Try to get process list reference
-    debug!("SCHEDULING!");
-    // process::print_process_list();
+pub fn schedule() -> ! {
     unsafe {
+        debug!("try schedule hart {}", cpu::get_mhartid());
         process::get_process_list_lock().spin_lock();
         if process::PROCESS_LIST.as_ref().unwrap().is_empty() {
-            println!("empty process list");
-            let mut all_none = true;
-            for process in process::PROCESS_RUNNING.as_ref().iter() {
-                if let Some(proc) = process {
-                    println!("pid : {}", proc.pid);
-                    all_none = false;
-                    break;
-                }
-            }
-            if all_none {
-                process::get_process_list_lock().unlock();
-                panic!("Shutting down hart {}, no more process.", cpu::get_hartid());
-            }
+            process::get_process_list_lock().unlock();
+            panic!(
+                "shutting down hart {}, no more process.",
+                cpu::get_mhartid()
+            );
         }
+        let mut blocked_count = 0;
         if let Some(mut process_list) = process::PROCESS_LIST.take() {
+            for proc in process_list.iter() {
+                debug!(
+                    "proc list hart {} pid {} state {:?}",
+                    cpu::get_mhartid(),
+                    proc.pid,
+                    proc.state
+                );
+            }
             loop {
                 // Get first process
-                if let Some(p) = process_list.front() {
-                    match p.state {
+                if let Some(front) = process_list.front_mut() {
+                    match front.state {
                         ProcessState::Ready => {
-                            let mut first = process_list.pop_front().unwrap();
-                            first.state = ProcessState::Running;
-                            process::PROCESS_RUNNING[cpu::get_hartid()].replace(first);
-
+                            front.state = ProcessState::Running(cpu::get_mhartid());
+                            let trap_frame = front.trap_frame;
+                            let quantum = front.quantum;
+                            debug!(
+                                "scheduling pid {} on hart {}",
+                                front.pid,
+                                cpu::get_mhartid()
+                            );
+                            process_list.rotate_left(1);
                             process::PROCESS_LIST.replace(process_list);
                             process::get_process_list_lock().unlock();
-                            return &process::PROCESS_RUNNING[cpu::get_hartid()];
+                            trap::schedule_machine_timer_interrupt(quantum);
+                            process::switch_to_process(trap_frame);
                         }
-                        ProcessState::Running => {}
-                        ProcessState::Sleeping => {
-                            let current_time = crate::trap::MMIO_MTIME.read_volatile() as usize;
+                        ProcessState::Running(_) => {
+                            process_list.rotate_left(1);
+                            blocked_count += 1;
+                            debug!("blocked count: {}:", blocked_count);
+                            if blocked_count == process_list.len() {
+                                debug!("break on running");
+                                break;
+                            }
+                        }
+                        ProcessState::Sleeping(until) => {
+                            blocked_count = 0;
 
-                            if p.sleep_until < current_time {
-                                let mut first = process_list.pop_front().unwrap();
-                                first.state = ProcessState::Running;
-                                process::PROCESS_RUNNING[cpu::get_hartid()].replace(first);
+                            let current_time = trap::get_mtime() as usize;
 
+                            if until < current_time {
+                                front.state = ProcessState::Running(cpu::get_mhartid());
+                                let trap_frame = front.trap_frame;
+                                let quantum = front.quantum;
+                                debug!(
+                                    "scheduling pid {} on hart {}",
+                                    front.pid,
+                                    cpu::get_mhartid()
+                                );
+                                process_list.rotate_left(1);
                                 process::PROCESS_LIST.replace(process_list);
                                 process::get_process_list_lock().unlock();
-                                return &process::PROCESS_RUNNING[cpu::get_hartid()];
+                                trap::schedule_machine_timer_interrupt(quantum);
+                                process::switch_to_process(trap_frame);
                             } else {
                                 process_list.rotate_left(1);
                             }
                         }
                         ProcessState::Blocked => {
                             process_list.rotate_left(1);
+                            blocked_count += 1;
+                            if blocked_count == process_list.len() {
+                                debug!("break on blocked");
+                                break;
+                            }
                         }
                     }
                 } else {
-                    process::PROCESS_LIST.replace(process_list);
-                    process::get_process_list_lock().unlock();
-                    // println!("schedule idel on hart {}", cpu::get_hartid());
-                    return &process::PROCESS_IDLE[cpu::get_hartid()];
+                    break;
                 }
             }
+            process::PROCESS_LIST.replace(process_list);
+            debug!("scheduling idle on hart {}", cpu::get_mhartid());
+            process::get_process_list_lock().unlock();
+            trap::disable_machine_timer_interrupt();
+            process::switch_to_process(
+                process::PROCESS_IDLE[cpu::get_mhartid()]
+                    .as_ref()
+                    .unwrap()
+                    .trap_frame,
+            );
         }
     }
-
-    &None
+    panic!("Scheduler could not schedule!");
 }

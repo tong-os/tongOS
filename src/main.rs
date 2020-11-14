@@ -56,15 +56,7 @@ extern "C" fn abort() -> ! {
 use tong_os::assembly::*;
 use tong_os::assignment;
 
-fn example_process3(iteration: usize) {
-    println!("Counting for {}", iteration);
-    let mut my_counter = 0;
-    for _ in 0..iteration {
-        my_counter += 1;
-    }
-    println!("Ex3 counter = {}. Expected = {}", my_counter, iteration);
-    tong_os::process::exit();
-}
+static mut MAY_BOOT: bool = false;
 
 #[no_mangle]
 extern "C" fn kinit(hartid: usize) -> ! {
@@ -113,24 +105,21 @@ extern "C" fn kinit(hartid: usize) -> ! {
 
         tong_os::assignment::choose_processes(tong_os::PROCESS_TO_RUN);
 
-        tong_os::trap::wake_all_harts();
-
-        if let Some(next_process) = tong_os::scheduler::schedule() {
-            tong_os::trap::schedule_machine_timer_interrupt(next_process.quantum);
-            tong_os::process::switch_to_user(&next_process);
+        unsafe {
+            asm!("fence");
+            MAY_BOOT = true;
         }
-        loop {}
+
+        tong_os::scheduler::schedule();
     } else {
-        unsafe { asm!("csrw mtvec, {}", in(reg) (__tong_os_trap_from_machine as usize)) }
-
-        let flags = 1 << 3;
-        unsafe { asm!("csrw mie, {}", in(reg) flags) }
-
-        tong_os::cpu::enable_global_interrupts();
-
-        println!("hart {} will wait", hartid);
         loop {
-            unsafe { asm!("wfi") }
+            if unsafe { MAY_BOOT } == true {
+                break;
+            }
         }
+
+        tong_os::trap::init();
+
+        tong_os::scheduler::schedule();
     }
 }

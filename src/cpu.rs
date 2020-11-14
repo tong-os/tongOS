@@ -126,7 +126,7 @@ pub const fn build_satp(asid: usize, pysical_address: usize) -> usize {
 }
 
 pub fn disable_global_interrupts() {
-    debug!("Disable global interrupts for hart {}!", get_hartid());
+    debug!("Disable global interrupts for hart {}!", get_mhartid());
     unsafe {
         let mstatus: usize;
         asm!("csrr {}, mstatus", out(reg) mstatus);
@@ -136,7 +136,7 @@ pub fn disable_global_interrupts() {
 }
 
 pub fn enable_global_interrupts() {
-    debug!("Enable global interrupts for hart {}!", get_hartid());
+    debug!("Enable global interrupts for hart {}!", get_mhartid());
     unsafe {
         // let mstatus: usize;
         // asm!("csrr {}, mstatus", out(reg) mstatus);
@@ -146,10 +146,16 @@ pub fn enable_global_interrupts() {
     }
 }
 
-pub fn get_hartid() -> usize {
+pub fn get_mhartid() -> usize {
     unsafe {
         let hartid: usize;
         asm!("csrr {}, mhartid", out(reg) hartid);
         hartid
     }
+}
+
+pub fn get_mcause() -> usize {
+    let mcause: usize;
+    unsafe { asm!("csrr {}, mcause", out(reg) mcause) };
+    mcause
 }

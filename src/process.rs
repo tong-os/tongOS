@@ -10,11 +10,11 @@ use crate::page::{self, PageTableEntryFlags, Sv39PageTable};
 
 use alloc::collections::vec_deque::VecDeque;
 
-pub static mut PROCESS_RUNNING: [Option<Process>; 4] = [None, None, None, None];
 pub static mut PROCESS_LIST: Option<VecDeque<Process>> = None;
 pub static mut PROCESS_LIST_LOCK: Mutex = Mutex::new();
 
 pub static mut NEXT_PID: usize = 0;
+pub static mut NEXT_PID_LOCK: Mutex = Mutex::new();
 pub static DEFAULT_QUANTUM: usize = 1;
 
 pub static mut PROCESS_LOCK: Mutex = Mutex::new();
@@ -27,6 +27,10 @@ pub fn get_process_lock() -> &'static mut Mutex {
 
 pub fn get_process_list_lock() -> &'static mut Mutex {
     unsafe { &mut PROCESS_LIST_LOCK }
+}
+
+fn get_next_pid_lock() -> &'static mut Mutex {
+    unsafe { &mut NEXT_PID_LOCK }
 }
 
 pub fn init() {
@@ -44,18 +48,18 @@ pub fn init() {
 // Blocked -> Ready = input available now
 // Sleeping -> Running/Ready = wake up
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ProcessState {
     Ready,
-    Running,
+    Running(usize),
     Blocked,
-    Sleeping,
+    Sleeping(usize),
 }
 
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct Process {
-    pub context: TrapFrame,
+    pub trap_frame: *mut TrapFrame,
     pub stack: *mut u8,
     pub state: ProcessState,
     pub page_table: *mut Sv39PageTable,
@@ -69,11 +73,6 @@ impl Process {
     pub fn new(start: usize, arg0: usize) -> Self {
         // cpu::disable_global_interrupts();
         get_process_lock().spin_lock();
-        let mut context = TrapFrame::new();
-        context.pc = start as usize;
-        context.mode = CpuMode::User as usize;
-
-        context.regs[cpu::GeneralPurposeRegister::A0 as usize] = arg0;
 
         let pid = unsafe {
             NEXT_PID += 1;
@@ -82,13 +81,25 @@ impl Process {
 
         let page_table_address = page::zalloc(1);
 
+        let mut context = TrapFrame::new();
+        context.regs[cpu::GeneralPurposeRegister::A0 as usize] = arg0;
         context.satp = cpu::build_satp(pid, page_table_address as usize);
+        context.pc = start as usize;
+        context.mode = CpuMode::User as usize;
 
         let num_stack_pages = 8;
         let stack = page::zalloc(num_stack_pages) as usize;
         let stack_end = stack + num_stack_pages * page::PAGE_SIZE;
 
-        context.regs[cpu::GeneralPurposeRegister::Sp as usize] = stack_end;
+        context.regs[cpu::GeneralPurposeRegister::Sp as usize] =
+            stack_end - core::mem::size_of::<TrapFrame>();
+
+        let trap_frame = context.regs[cpu::GeneralPurposeRegister::Sp as usize] as *mut TrapFrame;
+
+        unsafe {
+            let source = &context as *const TrapFrame;
+            core::ptr::copy(source, trap_frame, 1);
+        }
 
         let page_table = page_table_address as *mut Sv39PageTable;
 
@@ -152,7 +163,7 @@ impl Process {
         }
 
         let proc = Process {
-            context,
+            trap_frame,
             stack: stack as *mut u8,
             state: ProcessState::Ready,
             page_table,
@@ -177,10 +188,18 @@ impl Process {
         let stack = page::zalloc(num_stack_pages) as usize;
         let stack_end = stack + num_stack_pages * page::PAGE_SIZE;
 
-        context.regs[cpu::GeneralPurposeRegister::Sp as usize] = stack_end;
+        context.regs[cpu::GeneralPurposeRegister::Sp as usize] =
+            stack_end - core::mem::size_of::<TrapFrame>();
+
+        let trap_frame = context.regs[cpu::GeneralPurposeRegister::Sp as usize] as *mut TrapFrame;
+
+        unsafe {
+            let source = &context as *const TrapFrame;
+            core::ptr::copy(source, trap_frame, 1);
+        }
 
         let proc = Process {
-            context,
+            trap_frame,
             stack: stack as *mut u8,
             state: ProcessState::Ready,
             page_table: 0 as *mut _,
@@ -193,6 +212,10 @@ impl Process {
         get_process_lock().unlock();
 
         proc
+    }
+
+    pub fn get_trap_frame(&self) -> *mut TrapFrame {
+        self.trap_frame
     }
 }
 
@@ -221,23 +244,10 @@ pub fn create_thread(func: usize, arg0: usize) -> usize {
 }
 
 pub fn exit() {
-    unsafe {
-        debug!(
-            "exiting from pid: {}",
-            PROCESS_RUNNING[cpu::get_hartid()].as_ref().unwrap().pid
-        );
-    }
     make_user_syscall(0, 0, 0);
 }
 
 pub fn join(pid: usize) {
-    unsafe {
-        debug!(
-            "Join running.pid: {}, waiting pid {}",
-            PROCESS_RUNNING[cpu::get_hartid()].as_ref().unwrap().pid,
-            pid
-        );
-    }
     make_user_syscall(2, pid, 0);
 }
 
@@ -248,6 +258,10 @@ pub fn sleep(amount: usize) {
 pub fn read_line(buffer: &mut alloc::string::String) {
     make_user_syscall(4, buffer as *mut _ as usize, 0);
     while unsafe { crate::uart::READING } {}
+}
+
+pub fn print_line(buffer: &alloc::string::String) {
+    make_user_syscall(5, buffer as *const _ as usize, 0);
 }
 
 pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
@@ -315,29 +329,115 @@ pub fn process_list_remove(pid: usize) {
 }
 
 pub fn process_list_contains(pid: usize) -> bool {
-    get_process_list_lock().spin_lock();
     let mut contains = false;
-    if let Some(process_list) = unsafe { PROCESS_LIST.take() } {
-        if let Some(_) = process_list.iter().position(|process| process.pid == pid) {
+    get_process_list_lock().spin_lock();
+
+    for process in unsafe { PROCESS_LIST.as_mut().unwrap() } {
+        if pid == process.pid {
             contains = true;
         }
-
-        unsafe {
-            PROCESS_LIST.replace(process_list);
-        }
     }
+
     get_process_list_lock().unlock();
     contains
 }
 
-pub fn switch_to_user(process: &Process) -> ! {
-    // println!(
-    //     "switching to user for hart {} pid {}...",
-    //     cpu::get_hartid(),
-    //     process.pid
-    // );
-    debug!("switch_to_user: {}", process.pid);
-    unsafe { assembly::__tong_os_switch_to_user(process) }
+pub fn update_running_process_trap_frame(trap_frame: *mut TrapFrame) {
+    get_process_list_lock().spin_lock();
+
+    for process in unsafe { PROCESS_LIST.as_mut().unwrap() } {
+        if process.state == ProcessState::Running(cpu::get_mhartid()) {
+            process.trap_frame = trap_frame;
+        }
+    }
+
+    get_process_list_lock().unlock();
+}
+
+pub fn get_running_process_pid() -> Option<usize> {
+    let mut pid = None;
+
+    get_process_list_lock().spin_lock();
+
+    for process in unsafe { PROCESS_LIST.as_mut().unwrap() } {
+        if process.state == ProcessState::Running(cpu::get_mhartid()) {
+            pid = Some(process.pid);
+        }
+    }
+
+    get_process_list_lock().unlock();
+
+    pid
+}
+
+pub fn update_running_process_to_ready() {
+    get_process_list_lock().spin_lock();
+
+    for process in unsafe { PROCESS_LIST.as_mut().unwrap() } {
+        if process.state == ProcessState::Running(cpu::get_mhartid()) {
+            process.state = ProcessState::Ready;
+        }
+    }
+
+    get_process_list_lock().unlock();
+}
+
+pub fn update_running_process_to_blocked() {
+    get_process_list_lock().spin_lock();
+
+    for process in unsafe { PROCESS_LIST.as_mut().unwrap() } {
+        if process.state == ProcessState::Running(cpu::get_mhartid()) {
+            process.state = ProcessState::Blocked;
+        }
+    }
+
+    get_process_list_lock().unlock();
+}
+
+pub fn update_running_process_to_sleeping(until: usize) {
+    get_process_list_lock().spin_lock();
+
+    for process in unsafe { PROCESS_LIST.as_mut().unwrap() } {
+        if process.state == ProcessState::Running(cpu::get_mhartid()) {
+            process.state = ProcessState::Sleeping(until);
+        }
+    }
+
+    get_process_list_lock().unlock();
+}
+
+pub fn get_running_process_blocking_pid() -> Option<usize> {
+    let mut blocking_pid = None;
+    get_process_list_lock().spin_lock();
+
+    for process in unsafe { PROCESS_LIST.as_mut().unwrap() } {
+        if process.state == ProcessState::Running(cpu::get_mhartid()) {
+            blocking_pid = process.blocking_pid;
+        }
+    }
+
+    get_process_list_lock().unlock();
+    blocking_pid
+}
+
+pub fn delete_running_process() {
+    get_process_list_lock().spin_lock();
+
+    if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
+        process_list.remove(
+            process_list
+                .iter()
+                .enumerate()
+                .find(|(_i, proc)| proc.state == ProcessState::Running(cpu::get_mhartid()))
+                .unwrap()
+                .0,
+        );
+        unsafe {
+            PROCESS_LIST.replace(process_list);
+        }
+    }
+
+    get_process_list_lock().unlock();
 }
 
 pub fn print_process_list() {
@@ -349,6 +449,10 @@ pub fn print_process_list() {
             PROCESS_LIST.replace(process_list);
         }
     }
+}
+
+pub fn switch_to_process(trap_frame: *const TrapFrame) -> ! {
+    unsafe { assembly::__tong_os_switch_to_process(trap_frame) }
 }
 
 pub fn idle() {
