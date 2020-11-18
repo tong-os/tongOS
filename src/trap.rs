@@ -51,13 +51,16 @@ fn complete_software_interrupt(hartid: usize) {
 }
 
 pub fn wake_all_idle_harts() {
-    for i in 0..4 {
-        let idle = unsafe { process::PROCESS_IDLE[i].as_ref().unwrap() };
-        if let process::ProcessState::Running(_) = idle.state {
-            debug!("waking hart {}", i);
-            send_software_interrupt(i);
+    process::get_process_list_lock().spin_lock();
+    for (hartid, running) in process::running_list().iter().enumerate() {
+        if let Some(running) = running {
+            if running.pid == process::IDLE_ID {
+                debug!("waking hart {}", hartid);
+                send_software_interrupt(hartid);
+            }
         }
     }
+    process::get_process_list_lock().unlock();
 }
 
 // CLINT Memory Map
@@ -94,7 +97,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
             cpu::get_mcause(),
             (cpu::get_mstatus() & 1 << 3) >> 3,
             (cpu::get_mstatus() & 1 << 7) >> 7,
-            process::get_running_process_pid().unwrap_or(666),
+            process::get_running_process_pid(),
             (*trap_frame).global_interrupt_enable,
             (*trap_frame).mode
         );
@@ -114,11 +117,8 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                     "Handling asyng software interrupt on hart {}",
                     cpu::get_mhartid()
                 );
-                unsafe {
-                    let idle = process::PROCESS_IDLE[cpu::get_mhartid()].as_mut().unwrap();
-                    idle.state = process::ProcessState::Ready;
-                }
                 enable_machine_timer_interrupt();
+                process::move_running_process_to_idle();
                 scheduler::schedule();
             }
             7 => {
@@ -126,10 +126,12 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                     "Handling async timer interrupt on hart {}: mcause {}, pid {}",
                     cpu::get_mhartid(),
                     cause,
-                    process::get_running_process_pid().unwrap()
+                    process::get_running_process_pid()
                 );
-                if let Some(_) = process::get_running_process_pid() {
-                    process::update_running_process_to_ready();
+                if process::get_running_process_pid() == process::IDLE_ID {
+                    process::move_running_process_to_idle();
+                } else {
+                    process::move_running_process_to_ready();
                 }
                 scheduler::schedule();
             }
@@ -201,7 +203,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                 debug!(
                     "Handling user ecall exception: mcause {}, pid {}, syscall code {}",
                     cause,
-                    process::get_running_process_pid().unwrap(),
+                    process::get_running_process_pid(),
                     which_code,
                 );
 
@@ -255,9 +257,10 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                             process::switch_to_process(trap_frame);
                         } else {
                             debug!("contains");
-                            let blocking_pid = process::get_running_process_pid().unwrap();
+                            let blocking_pid = process::get_running_process_pid();
                             process::set_blocking_pid(joining_pid, blocking_pid);
-                            process::update_running_process_to_blocked();
+                            process::move_running_process_to_blocked();
+                            debug!("contains");
                             scheduler::schedule();
                         }
                     }
@@ -273,7 +276,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                             get_mtime() as usize + amount * cpu::CONTEXT_SWITCH_TIME as usize;
 
                         if crate::ENABLE_PREEMPTION {
-                            process::update_running_process_to_sleeping(until);
+                            process::move_running_process_to_sleeping(until);
                             scheduler::schedule();
                         } else {
                             // sleep

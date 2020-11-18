@@ -29,10 +29,10 @@ extern "C" fn eh_personality() {}
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    print!("Aborting: ");
     if let Some(p) = info.location() {
         println!(
-            "line {}, file {}: {}",
+            "hart {}: Aborting: line {}, file {}: {}",
+            tong_os::cpu::get_mhartid(),
             p.line(),
             p.file(),
             info.message().unwrap()
