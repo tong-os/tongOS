@@ -9,24 +9,19 @@ use crate::trap;
 
 pub fn schedule() -> ! {
     unsafe {
-        debug!("running schedule on hart {}", cpu::get_mhartid());
         process::get_process_list_lock().spin_lock();
-        if process::PROCESS_LIST.as_ref().unwrap().is_empty() {
-            process::get_process_list_lock().unlock();
-            panic!(
-                "shutting down hart {}, no more process.",
-                cpu::get_mhartid()
-            );
-        }
+        debug!("running schedule");
+        // if process::PROCESS_LIST.as_ref().unwrap().is_empty() {
+        //     process::get_process_list_lock().unlock();
+        //     panic!(
+        //         "shutting down hart {}, no more process.",
+        //         cpu::get_mhartid()
+        //     );
+        // }
         let mut blocked_count = 0;
         if let Some(mut process_list) = process::PROCESS_LIST.take() {
             for proc in process_list.iter() {
-                debug!(
-                    "proc list hart {} pid {} state {:?}",
-                    cpu::get_mhartid(),
-                    proc.pid,
-                    proc.state
-                );
+                debug!("proc list pid {} state {:?}", proc.pid, proc.state);
             }
             loop {
                 // Get first process
@@ -36,11 +31,7 @@ pub fn schedule() -> ! {
                             front.state = ProcessState::Running(cpu::get_mhartid());
                             let trap_frame = front.trap_frame;
                             let quantum = front.quantum;
-                            debug!(
-                                "scheduling pid {} on hart {}",
-                                front.pid,
-                                cpu::get_mhartid()
-                            );
+                            debug!("scheduling pid {}", front.pid);
                             process_list.rotate_left(1);
                             process::PROCESS_LIST.replace(process_list);
                             process::get_process_list_lock().unlock();
@@ -50,7 +41,6 @@ pub fn schedule() -> ! {
                         ProcessState::Running(_) => {
                             process_list.rotate_left(1);
                             blocked_count += 1;
-                            debug!("blocked count: {}:", blocked_count);
                             if blocked_count == process_list.len() {
                                 debug!("break on running");
                                 break;
@@ -65,11 +55,7 @@ pub fn schedule() -> ! {
                                 front.state = ProcessState::Running(cpu::get_mhartid());
                                 let trap_frame = front.trap_frame;
                                 let quantum = front.quantum;
-                                debug!(
-                                    "scheduling pid {} on hart {}",
-                                    front.pid,
-                                    cpu::get_mhartid()
-                                );
+                                debug!("scheduling pid {}", front.pid);
                                 process_list.rotate_left(1);
                                 process::PROCESS_LIST.replace(process_list);
                                 process::get_process_list_lock().unlock();
@@ -93,9 +79,11 @@ pub fn schedule() -> ! {
                 }
             }
             process::PROCESS_LIST.replace(process_list);
-            debug!("scheduling idle on hart {}", cpu::get_mhartid());
+            debug!("scheduling idle");
             process::get_process_list_lock().unlock();
             trap::disable_machine_timer_interrupt();
+            let idle = process::PROCESS_IDLE[cpu::get_mhartid()].as_mut().unwrap();
+            idle.state = ProcessState::Running(cpu::get_mhartid());
             process::switch_to_process(
                 process::PROCESS_IDLE[cpu::get_mhartid()]
                     .as_ref()

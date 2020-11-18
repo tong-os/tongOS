@@ -1,4 +1,6 @@
 use crate::assembly::*;
+use crate::process;
+use alloc::format;
 
 pub fn test_bss() {
     print!("Checking BSS ...  ");
@@ -41,51 +43,41 @@ pub fn print_sections() {
     }
 }
 
-use crate::process;
-
-fn some_math(n: usize) {
-    let mut sum = 0;
-    for i in 0..n {
-        for j in 0..n {
-            for k in 0..n {
-                sum += i * j + 6 * k;
-            }
-        }
-    }
-}
-
 pub fn example_process1(test: usize) -> () {
-    println!("Example process 1");
-    println!("YEAH, we're running as user with virtual address translation!");
+    process::print_str("Example process 1");
+    process::print_str("YEAH, we're running as user with virtual address translation!");
 
     // some_math(100);
 
-    println!("Arg: {}", test);
+    process::print_str(&format!("Arg: {}", test));
 
-    println!("exiting process");
+    process::print_str("exiting process");
     process::exit();
 }
 
 pub fn example_process2() -> () {
-    println!("EXAMPLE 2, ARE YOU READY??");
+    process::print_str("EXAMPLE 2, ARE YOU READY??");
 
     // some_math(100);
 
-    println!("exiting process");
+    process::print_str("exiting process");
     process::exit();
 }
 
 pub fn example_process3(iteration: usize) {
-    println!("Example process 3!");
+    process::print_str("Example process 3!");
 
     // some_math(100);
 
-    println!("Counting for {}", iteration);
+    process::print_str(&format!("Counting for {}", iteration));
     let mut my_counter = 0;
     for _ in 0..iteration {
         my_counter += 1;
     }
-    println!("Ex3 counter = {}. Expected = {}", my_counter, iteration);
+    process::print_str(&format!(
+        "Ex3 counter = {}. Expected = {}",
+        my_counter, iteration
+    ));
     process::exit();
 }
 

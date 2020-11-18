@@ -154,6 +154,14 @@ pub fn get_mhartid() -> usize {
     }
 }
 
+pub fn get_mstatus() -> usize {
+    unsafe {
+        let mstatus: usize;
+        asm!("csrr {}, mstatus", out(reg) mstatus);
+        mstatus
+    }
+}
+
 pub fn get_mcause() -> usize {
     let mcause: usize;
     unsafe { asm!("csrr {}, mcause", out(reg) mcause) };

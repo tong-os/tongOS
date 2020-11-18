@@ -14,10 +14,8 @@ pub fn init() {
 
     unsafe { asm!("csrw mtvec, {}", in(reg) (__tong_os_trap_machine_mode as usize)) }
 
-    // configure mstatus
-    // enable_global_interrupts();
-
     // [7] = MTIE (Machine Time Interrupt Enable)
+    // [3] = MSIE (Machine Software Interrupt Enable)
     let flags = 1 << 7 | 1 << 3;
     unsafe { asm!("csrw mie, {}", in(reg) flags) }
 }
@@ -52,10 +50,11 @@ fn complete_software_interrupt(hartid: usize) {
     }
 }
 
-pub fn wake_all_harts() {
+pub fn wake_all_idle_harts() {
     for i in 0..4 {
-        if i != cpu::get_mhartid() {
-            println!("waking hart {}", i);
+        let idle = unsafe { process::PROCESS_IDLE[i].as_ref().unwrap() };
+        if let process::ProcessState::Running(_) = idle.state {
+            debug!("waking hart {}", i);
             send_software_interrupt(i);
         }
     }
@@ -89,6 +88,17 @@ pub fn schedule_machine_timer_interrupt(quantum: usize) {
 #[no_mangle]
 pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
     process::update_running_process_trap_frame(trap_frame);
+    unsafe {
+        debug!(
+            "trap: mcause: {:x}, MIE {}, MPIE {}, pid {}, global_interrupt_enable {}, mode: {:?}, ",
+            cpu::get_mcause(),
+            (cpu::get_mstatus() & 1 << 3) >> 3,
+            (cpu::get_mstatus() & 1 << 7) >> 7,
+            process::get_running_process_pid().unwrap_or(666),
+            (*trap_frame).global_interrupt_enable,
+            (*trap_frame).mode
+        );
+    }
 
     let mcause = cpu::get_mcause();
     // Get interrupt bit from mcause
@@ -100,10 +110,14 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
         match cause {
             3 => {
                 complete_software_interrupt(cpu::get_mhartid());
-                println!(
+                debug!(
                     "Handling asyng software interrupt on hart {}",
                     cpu::get_mhartid()
                 );
+                unsafe {
+                    let idle = process::PROCESS_IDLE[cpu::get_mhartid()].as_mut().unwrap();
+                    idle.state = process::ProcessState::Ready;
+                }
                 enable_machine_timer_interrupt();
                 scheduler::schedule();
             }
@@ -197,7 +211,9 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         debug!("handling exit");
                         // Check if child process needs to reschedule parent
                         if let Some(blocked) = process::get_running_process_blocking_pid() {
+                            debug!("waking blocked: {}", blocked);
                             process::wake_process(blocked);
+                            wake_all_idle_harts();
                         }
                         process::delete_running_process();
                         scheduler::schedule();
@@ -217,12 +233,12 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                                 new_process_pid;
                             (*trap_frame).pc += 4;
                         }
-                        // wake_all_harts();
+                        wake_all_idle_harts();
                         process::switch_to_process(trap_frame);
                     }
                     // Joining thread
                     2 => {
-                        debug!("handling joining");
+                        debug!("handling join");
                         let joining_pid =
                             unsafe { (*trap_frame).regs[GeneralPurposeRegister::A1 as usize] };
                         debug!("joining pid: {}", joining_pid);
@@ -234,8 +250,9 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         if !process::process_list_contains(joining_pid) {
                             debug!("not contains");
                             // add runnign to proc list as readdy and schedule
-                            process::update_running_process_to_ready();
-                            scheduler::schedule();
+                            // process::update_running_process_to_ready();
+                            // scheduler::schedule();
+                            process::switch_to_process(trap_frame);
                         } else {
                             debug!("contains");
                             let blocking_pid = process::get_running_process_pid().unwrap();
@@ -290,19 +307,30 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         }
                         process::switch_to_process(trap_frame);
                     }
-                    // syscall print line
+                    // syscall print str
                     5 => {
-                        debug!("handling print line");
+                        debug!("handling print str");
                         unsafe {
                             (*trap_frame).pc += 4;
                         }
-                        let buffer: &mut alloc::string::String = unsafe {
+                        let buffer: *const u8 = unsafe {
                             core::mem::transmute(
                                 (*trap_frame).regs[GeneralPurposeRegister::A1 as usize],
                             )
                         };
 
-                        println!("{}", buffer);
+                        let len: usize = unsafe {
+                            core::mem::transmute(
+                                (*trap_frame).regs[GeneralPurposeRegister::A2 as usize],
+                            )
+                        };
+
+                        let slice = unsafe {
+                            let slice = core::slice::from_raw_parts(buffer, len);
+                            core::str::from_utf8_unchecked(slice)
+                        };
+
+                        println!("hart {}: {}", cpu::get_mhartid(), slice);
                         process::switch_to_process(trap_frame);
                     }
                     code => {

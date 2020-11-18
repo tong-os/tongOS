@@ -62,11 +62,13 @@ __tong_os_trap_machine_mode:
     # Save Global_interrupt_enable
     li t4, 1 << 7
     and t4, t3, t4
+    srli t4, t4, 7
     sd t4, 66*8(sp)
 
     # Save machine previous protection
     li t5, 11 << 11
     and t5, t3, t5
+    srli t5, t5, 11
     sd t5, 67*8(sp)
 
     # Prepare arg 0 as trap_frame
@@ -91,27 +93,29 @@ _call_mtrap:
 __tong_os_switch_to_process:
     # a0 = process trap frame on stack end
 
-    # Load program counter
-    ld a1, 65*8(a0)
     # Load satp
-    ld a2, 64*8(a0)
-    # Load processor mode
-    ld a3, 67*8(a0)
+    ld a1, 64*8(a0)
+    # Load program counter
+    ld a2, 65*8(a0)
     # Load global interrupt enable
-    ld a4, 66*8(a0)
+    ld a3, 66*8(a0)
+    # Load processor mode
+    ld a4, 67*8(a0)
 
+    # shift global_interrupt_enable
+    slli a3, a3, 7
     # shift mode to correct place
-    slli  a3, a3, 11
+    slli  a4, a4, 11
     # merge flags and mode
-    or    t0, a4, a3
+    or    t0, a3, a4
     # write to mstatus
     csrw  mstatus, t0
 
     # write mepc with process pc
-    csrw  mepc, a1
+    csrw  mepc, a2
 
     # write satp with process satp
-    csrw  satp, a2
+    csrw  satp, a1
 
     # load_context
     mv t6, a0

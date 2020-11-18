@@ -66,7 +66,7 @@ impl KernelPageDescriptor {
 pub fn init() {
     unsafe {
         // Allocate kernel pages (KMEM_ALLOC)
-        KMEM_ALLOC = 2048;
+        KMEM_ALLOC = 4096;
         let k_alloc = page::zalloc(KMEM_ALLOC);
         // Check if allcation is right
         assert!(!k_alloc.is_null());

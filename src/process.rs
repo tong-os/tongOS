@@ -11,26 +11,22 @@ use crate::page::{self, PageTableEntryFlags, Sv39PageTable};
 use alloc::collections::vec_deque::VecDeque;
 
 pub static mut PROCESS_LIST: Option<VecDeque<Process>> = None;
+pub static mut PROCESS_IDLE: [Option<Process>; 4] = [None, None, None, None];
 pub static mut PROCESS_LIST_LOCK: Mutex = Mutex::new();
+
+pub static DEFAULT_QUANTUM: usize = 1;
 
 pub static mut NEXT_PID: usize = 0;
 pub static mut NEXT_PID_LOCK: Mutex = Mutex::new();
-pub static DEFAULT_QUANTUM: usize = 1;
 
-pub static mut PROCESS_LOCK: Mutex = Mutex::new();
+pub static mut PROCESS_NEW_LOCK: Mutex = Mutex::new();
 
-pub static mut PROCESS_IDLE: [Option<Process>; 4] = [None, None, None, None];
-
-pub fn get_process_lock() -> &'static mut Mutex {
-    unsafe { &mut PROCESS_LOCK }
+pub fn get_process_new_lock() -> &'static mut Mutex {
+    unsafe { &mut PROCESS_NEW_LOCK }
 }
 
 pub fn get_process_list_lock() -> &'static mut Mutex {
     unsafe { &mut PROCESS_LIST_LOCK }
-}
-
-fn get_next_pid_lock() -> &'static mut Mutex {
-    unsafe { &mut NEXT_PID_LOCK }
 }
 
 pub fn init() {
@@ -71,7 +67,7 @@ pub struct Process {
 
 impl Process {
     pub fn new(start: usize, arg0: usize) -> Self {
-        get_process_lock().spin_lock();
+        get_process_new_lock().spin_lock();
 
         let pid = unsafe {
             NEXT_PID += 1;
@@ -84,6 +80,7 @@ impl Process {
         context.regs[cpu::GeneralPurposeRegister::A0 as usize] = arg0;
         context.satp = cpu::build_satp(pid, page_table_address as usize);
         context.pc = start as usize;
+        context.global_interrupt_enable = 0;
         context.mode = CpuMode::User as usize;
 
         let num_stack_pages = 8;
@@ -171,16 +168,16 @@ impl Process {
             blocking_pid: None,
             sleep_until: 0,
         };
-        get_process_lock().unlock();
+        get_process_new_lock().unlock();
         proc
     }
 
     pub fn new_idle() -> Self {
-        get_process_lock().spin_lock();
+        get_process_new_lock().spin_lock();
         let mut context = TrapFrame::new();
         context.pc = self::idle as usize;
+        context.global_interrupt_enable = 1;
         context.mode = CpuMode::Machine as usize;
-        context.global_interrupt_enable = 1 << 7;
 
         let num_stack_pages = 2;
         let stack = page::zalloc(num_stack_pages) as usize;
@@ -207,7 +204,7 @@ impl Process {
             sleep_until: 0,
         };
 
-        get_process_lock().unlock();
+        get_process_new_lock().unlock();
 
         proc
     }
@@ -258,8 +255,8 @@ pub fn read_line(buffer: &mut alloc::string::String) {
     while unsafe { crate::uart::READING } {}
 }
 
-pub fn print_line(buffer: &alloc::string::String) {
-    make_user_syscall(5, buffer as *const _ as usize, 0);
+pub fn print_str(buffer: &str) {
+    make_user_syscall(5, buffer.as_ptr() as usize, buffer.len());
 }
 
 pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
@@ -349,6 +346,13 @@ pub fn update_running_process_trap_frame(trap_frame: *mut TrapFrame) {
         }
     }
 
+    unsafe {
+        let idle = PROCESS_IDLE[cpu::get_mhartid()].as_mut().unwrap();
+        if idle.state == ProcessState::Running(cpu::get_mhartid()) {
+            idle.trap_frame = trap_frame;
+        }
+    }
+
     get_process_list_lock().unlock();
 }
 
@@ -360,6 +364,13 @@ pub fn get_running_process_pid() -> Option<usize> {
     for process in unsafe { PROCESS_LIST.as_mut().unwrap() } {
         if process.state == ProcessState::Running(cpu::get_mhartid()) {
             pid = Some(process.pid);
+        }
+    }
+
+    unsafe {
+        let idle = PROCESS_IDLE[cpu::get_mhartid()].as_mut().unwrap();
+        if idle.state == ProcessState::Running(cpu::get_mhartid()) {
+            pid = Some(idle.pid);
         }
     }
 
@@ -453,7 +464,7 @@ pub fn switch_to_process(trap_frame: *const TrapFrame) -> ! {
     unsafe { assembly::__tong_os_switch_to_process(trap_frame) }
 }
 
-pub fn idle() {
+pub fn idle() -> ! {
     loop {
         unsafe { asm!("wfi") }
     }

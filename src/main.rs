@@ -14,7 +14,6 @@
 
 use tong_os::{print, println};
 
-#[macro_use]
 extern crate alloc;
 
 #[cfg(test)]

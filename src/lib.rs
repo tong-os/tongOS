@@ -33,14 +33,18 @@ fn test_runner(tests: &[&dyn Fn()]) {
     }
 }
 
+pub fn _print(args: core::fmt::Arguments) {
+    get_print_lock().spin_lock();
+    let mut uart = uart::Uart::new(0x1000_0000);
+    use core::fmt::Write;
+    uart.write_fmt(args).unwrap();
+    get_print_lock().unlock();
+}
+
 #[macro_export]
 macro_rules! print {
     ($($args:tt)+) => {{
-        $crate::get_print_lock().spin_lock();
-        let mut uart = $crate::uart::Uart::new(0x1000_0000);
-        use core::fmt::Write;
-        let _ = write!(uart, $($args)+);
-        $crate::get_print_lock().unlock();
+        $crate::_print(format_args!($($args)+))
     }};
 }
 
@@ -61,17 +65,17 @@ macro_rules! println {
 macro_rules! debug {
     () => {{
         if $crate::DEBUG_OUTPUT {
-            println!()
+            println!(concat!("hart {}: "), $crate::cpu::get_mhartid())
         }
     }};
     ($fmt:expr) => {{
         if $crate::DEBUG_OUTPUT {
-            println!($fmt)
+            println!(concat!("hart {}: ", $fmt), $crate::cpu::get_mhartid())
         }
     }};
     ($fmt:expr, $($args:tt)+) => {{
         if $crate::DEBUG_OUTPUT {
-            println!($fmt, $($args)+)
+            println!(concat!("hart {}: ", $fmt), $crate::cpu::get_mhartid(), $($args)+)
         }
     }};
 }

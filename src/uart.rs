@@ -2,7 +2,6 @@
 // UART routines and driver
 // Stephen Marz
 
-
 use core::{
     convert::TryInto,
     fmt::{Error, Write},
