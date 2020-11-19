@@ -56,7 +56,7 @@ fn send_software_interrupt(hartid: usize) {
     }
 }
 
-fn complete_software_interrupt(hartid: usize) {
+pub fn complete_software_interrupt(hartid: usize) {
     let clint_base = 0x200_0000 as *mut u32;
 
     unsafe {
@@ -67,9 +67,12 @@ fn complete_software_interrupt(hartid: usize) {
 pub fn wake_all_idle_harts() {
     process::get_process_list_lock().spin_lock();
     for (hartid, running) in process::running_list().iter().enumerate() {
-        if let Some(_) = running {
-            debug!("waking hart {}", hartid);
-            send_software_interrupt(hartid);
+        process::print_process_list();
+        if let Some(running) = running {
+            if running.pid == process::IDLE_ID {
+                debug!("waking hart {}", hartid);
+                send_software_interrupt(hartid);
+            }
         }
     }
     process::get_process_list_lock().unlock();
@@ -129,11 +132,15 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                     "Handling asyng software interrupt on hart {}",
                     cpu::get_mhartid()
                 );
-                if process::get_running_process_pid() == process::IDLE_ID {
-                    process::move_running_process_to_idle();
-                    scheduler::schedule();
-                }
-                process::switch_to_process(trap_frame);
+
+                assert!(
+                    process::get_running_process_pid() == process::IDLE_ID,
+                    "found pid : {}",
+                    process::get_running_process_pid()
+                );
+
+                process::move_running_process_to_idle();
+                scheduler::schedule();
             }
             7 => {
                 debug!(

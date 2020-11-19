@@ -11,7 +11,7 @@ pub fn schedule() -> ! {
     process::get_process_list_lock().spin_lock();
     debug!("running schedule");
 
-    process::print_process_list();
+    // process::print_process_list();
 
     if let Some(mut next) = process::ready_list_mut().pop_front() {
         next.state = ProcessState::Running(cpu::get_mhartid());
@@ -21,6 +21,7 @@ pub fn schedule() -> ! {
         let quantum = process::running_process().quantum;
         process::get_process_list_lock().unlock();
         trap::schedule_machine_timer_interrupt(quantum);
+        trap::disable_machine_software_interrupt();
         process::switch_to_process(trap_frame);
     } else {
         let mut idle = process::idle_process_take();
@@ -31,6 +32,8 @@ pub fn schedule() -> ! {
         let quantum = process::running_process().quantum;
         process::get_process_list_lock().unlock();
         trap::schedule_machine_timer_interrupt(quantum);
+        trap::complete_software_interrupt(cpu::get_mhartid());
+        trap::enable_machine_software_interrupt();
         process::switch_to_process(trap_frame);
     }
 }

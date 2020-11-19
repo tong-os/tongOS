@@ -357,9 +357,6 @@ pub fn try_wake_sleeping() -> bool {
     let mut woken = false;
     get_process_list_lock().spin_lock();
 
-    debug!("before");
-    print_process_list();
-
     let mut iter = sleeping_list().iter();
     let current_time = crate::trap::get_mtime() as usize;
     while let Some(pos) = iter.position(|p| {
@@ -379,9 +376,6 @@ pub fn try_wake_sleeping() -> bool {
         debug!("woken pid {}", woken.pid);
         ready_list_mut().push_back(woken);
     }
-
-    debug!("after");
-    print_process_list();
 
     get_process_list_lock().unlock();
     woken
@@ -404,8 +398,6 @@ pub fn process_list_add(process: Process) {
     debug!("process list add pid {}", process.pid);
 
     ready_list_mut().push_back(process);
-
-    print_process_list();
 
     get_process_list_lock().unlock();
 }
@@ -472,6 +464,7 @@ pub fn move_running_process_to_ready() {
 
 pub fn move_running_process_to_blocked() {
     get_process_list_lock().spin_lock();
+
 
     let mut running = running_process_take();
     running.state = ProcessState::Blocked;
