@@ -332,16 +332,13 @@ pub fn print_str(buffer: &str) {
 pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
     get_process_list_lock().spin_lock();
 
-    if let Some(process) = running_list_mut()
-        .iter_mut()
-        .find(|op| {
-            if let Some(process) = op {
-                process.pid == pid
-            } else {
-                false
-            }
-        })
-    {
+    if let Some(process) = running_list_mut().iter_mut().find(|op| {
+        if let Some(process) = op {
+            process.pid == pid
+        } else {
+            false
+        }
+    }) {
         process.as_mut().unwrap().blocking_pid = Some(blocking_pid);
     }
 
@@ -360,11 +357,45 @@ pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
     get_process_list_lock().unlock();
 }
 
-pub fn wake_process(blocked_pid: usize) {
+pub fn try_wake_sleeping() -> bool {
+    let mut woken = false;
     get_process_list_lock().spin_lock();
 
-    if let Some(pros) = blocked_list().iter().position(|p| p.pid == blocked_pid) {
-        let mut woken = blocked_list_mut().remove(pros).unwrap();
+    debug!("before");
+    print_process_list();
+
+    let mut iter = sleeping_list().iter();
+    let current_time = crate::trap::get_mtime() as usize;
+    while let Some(pos) = iter.position(|p| {
+        if let ProcessState::Sleeping(until) = p.state {
+            if until < current_time {
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }) {
+        woken = true;
+        let mut woken = sleeping_list_mut().swap_remove_back(pos).unwrap();
+        woken.state = ProcessState::Ready;
+        debug!("woken pid {}", woken.pid);
+        ready_list_mut().push_back(woken);
+    }
+
+    debug!("after");
+    print_process_list();
+
+    get_process_list_lock().unlock();
+    woken
+}
+
+pub fn move_blocked_process_to_ready(blocked_pid: usize) {
+    get_process_list_lock().spin_lock();
+
+    if let Some(pos) = blocked_list().iter().position(|p| p.pid == blocked_pid) {
+        let mut woken = blocked_list_mut().remove(pos).unwrap();
         woken.state = ProcessState::Ready;
         ready_list_mut().push_back(woken);
     }
@@ -458,6 +489,7 @@ pub fn move_running_process_to_sleeping(until: usize) {
     get_process_list_lock().spin_lock();
 
     let mut running = running_process_take();
+
     running.state = ProcessState::Sleeping(until);
 
     sleeping_list_mut().push_back(running);

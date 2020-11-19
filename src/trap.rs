@@ -117,19 +117,22 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                     "Handling asyng software interrupt on hart {}",
                     cpu::get_mhartid()
                 );
-                enable_machine_timer_interrupt();
                 process::move_running_process_to_idle();
                 scheduler::schedule();
             }
             7 => {
                 debug!(
-                    "Handling async timer interrupt on hart {}: mcause {}, pid {}",
-                    cpu::get_mhartid(),
+                    "Handling async timer interrupt: mtime {}, mcause {}, pid {}",
+                    get_mtime(),
                     cause,
                     process::get_running_process_pid()
                 );
+                if process::try_wake_sleeping() {
+                    wake_all_idle_harts();
+                }
                 if process::get_running_process_pid() == process::IDLE_ID {
-                    process::move_running_process_to_idle();
+                    schedule_machine_timer_interrupt(1);
+                    process::switch_to_process(trap_frame);
                 } else {
                     process::move_running_process_to_ready();
                 }
@@ -214,7 +217,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         // Check if child process needs to reschedule parent
                         if let Some(blocked) = process::get_running_process_blocking_pid() {
                             debug!("waking blocked: {}", blocked);
-                            process::wake_process(blocked);
+                            process::move_blocked_process_to_ready(blocked);
                             wake_all_idle_harts();
                         }
                         process::delete_running_process();

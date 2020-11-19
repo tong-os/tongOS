@@ -28,8 +28,9 @@ pub fn schedule() -> ! {
         debug!("scheduling idle");
         process::running_process_replace(idle);
         let trap_frame = process::running_process().trap_frame;
+        let quantum = process::running_process().quantum;
         process::get_process_list_lock().unlock();
-        trap::disable_machine_timer_interrupt();
+        trap::schedule_machine_timer_interrupt(quantum);
         process::switch_to_process(trap_frame);
     }
 }
