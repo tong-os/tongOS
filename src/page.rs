@@ -4,6 +4,7 @@
 //  tongOS team
 
 use crate::assembly::{HEAP_SIZE, HEAP_START};
+use crate::lock::Mutex;
 
 // Page size = 4096 bytes
 pub const PAGE_ORDER: usize = 12;
@@ -12,6 +13,12 @@ pub const PAGE_SIZE: usize = 1 << PAGE_ORDER;
 pub static mut NUMBER_OF_PAGES: usize = 0;
 pub static mut PAGE_TABLE_START_ADDRESS: usize = 0;
 pub static mut PAGE_DESCRIPTOR_PTR: *mut PageDescriptor = core::ptr::null_mut();
+
+pub static mut ALLOC_LOCK: Mutex = Mutex::new();
+
+fn get_alloc_lock() -> &'static mut Mutex {
+    unsafe { &mut ALLOC_LOCK }
+}
 
 /// Align (set to a multiple of some power of two)
 /// This takes an order which is the exponent to 2^order
@@ -265,6 +272,7 @@ pub fn init() {
 /// request_pages: the number of PAGE_SIZE pages to allocate
 /// return
 pub fn alloc(request_pages: usize) -> *mut u8 {
+    get_alloc_lock().spin_lock();
     // We have to find a contiguous allocation of pages
     assert!(request_pages > 0);
     unsafe {
@@ -292,10 +300,12 @@ pub fn alloc(request_pages: usize) -> *mut u8 {
                 (*page_descriptors.add(i + request_pages - 1)).set_flag(PageDescriptorFlags::Taken);
                 (*page_descriptors.add(i + request_pages - 1)).set_flag(PageDescriptorFlags::Last);
 
+                get_alloc_lock().unlock();
                 return (PAGE_TABLE_START_ADDRESS + PAGE_SIZE * i) as *mut u8;
             }
         }
     }
+    get_alloc_lock().unlock();
     core::ptr::null_mut()
 }
 
@@ -320,6 +330,7 @@ pub fn zalloc(pages: usize) -> *mut u8 {
 
 /// Deallocate a page by its pointer
 pub fn dealloc(ptr: *mut u8) {
+    get_alloc_lock().spin_lock();
     // Make sure we don't try to free a null pointer.
     assert!(!ptr.is_null());
     unsafe {
@@ -344,6 +355,8 @@ pub fn dealloc(ptr: *mut u8) {
         // we are on the last page.
         (*p).clear();
     }
+
+    get_alloc_lock().unlock();
 }
 
 /// Print all page allocations

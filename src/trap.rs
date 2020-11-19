@@ -34,6 +34,20 @@ pub fn enable_machine_timer_interrupt() {
     unsafe { asm!("csrw mie, {}", in(reg) flags | flags_mask) }
 }
 
+pub fn disable_machine_software_interrupt() {
+    let flags: usize;
+    unsafe { asm!("csrr {}, mie", out(reg) flags) }
+    let flags_mask = !(1 << 3);
+    unsafe { asm!("csrw mie, {}", in(reg) flags & flags_mask) }
+}
+
+pub fn enable_machine_software_interrupt() {
+    let flags: usize;
+    unsafe { asm!("csrr {}, mie", out(reg) flags) }
+    let flags_mask = 1 << 3;
+    unsafe { asm!("csrw mie, {}", in(reg) flags | flags_mask) }
+}
+
 fn send_software_interrupt(hartid: usize) {
     let clint_base = 0x200_0000 as *mut u32;
 
@@ -53,11 +67,9 @@ fn complete_software_interrupt(hartid: usize) {
 pub fn wake_all_idle_harts() {
     process::get_process_list_lock().spin_lock();
     for (hartid, running) in process::running_list().iter().enumerate() {
-        if let Some(running) = running {
-            if running.pid == process::IDLE_ID {
-                debug!("waking hart {}", hartid);
-                send_software_interrupt(hartid);
-            }
+        if let Some(_) = running {
+            debug!("waking hart {}", hartid);
+            send_software_interrupt(hartid);
         }
     }
     process::get_process_list_lock().unlock();
@@ -117,8 +129,11 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                     "Handling asyng software interrupt on hart {}",
                     cpu::get_mhartid()
                 );
-                process::move_running_process_to_idle();
-                scheduler::schedule();
+                if process::get_running_process_pid() == process::IDLE_ID {
+                    process::move_running_process_to_idle();
+                    scheduler::schedule();
+                }
+                process::switch_to_process(trap_frame);
             }
             7 => {
                 debug!(

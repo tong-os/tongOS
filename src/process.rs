@@ -137,14 +137,13 @@ pub struct Process {
 
 impl Process {
     pub fn new(start: usize, arg0: usize) -> Self {
-        get_process_new_lock().spin_lock();
-
         let pid = unsafe {
             NEXT_PID += 1;
             NEXT_PID
         };
 
         let page_table_address = page::zalloc(1);
+        assert!(page_table_address as *const u8 != core::ptr::null());
 
         let mut context = TrapFrame::new();
         context.regs[cpu::GeneralPurposeRegister::A0 as usize] = arg0;
@@ -153,8 +152,9 @@ impl Process {
         context.global_interrupt_enable = 0;
         context.mode = CpuMode::User as usize;
 
-        let num_stack_pages = 24;
+        let num_stack_pages = 12;
         let stack = page::zalloc(num_stack_pages) as usize;
+        assert!(stack as *const u8 != core::ptr::null());
         let stack_end = stack + num_stack_pages * page::PAGE_SIZE;
 
         context.regs[cpu::GeneralPurposeRegister::Sp as usize] =
@@ -228,7 +228,7 @@ impl Process {
             }
         }
 
-        let proc = Process {
+        Process {
             trap_frame,
             stack: stack as *mut u8,
             state: ProcessState::Ready,
@@ -237,13 +237,10 @@ impl Process {
             pid,
             blocking_pid: None,
             sleep_until: 0,
-        };
-        get_process_new_lock().unlock();
-        proc
+        }
     }
 
     pub fn new_idle() -> Self {
-        get_process_new_lock().spin_lock();
         let mut context = TrapFrame::new();
         context.pc = self::idle as usize;
         context.global_interrupt_enable = 1;
@@ -251,6 +248,7 @@ impl Process {
 
         let num_stack_pages = 2;
         let stack = page::zalloc(num_stack_pages) as usize;
+        assert!(stack as *const u8 != core::ptr::null());
         let stack_end = stack + num_stack_pages * page::PAGE_SIZE;
 
         context.regs[cpu::GeneralPurposeRegister::Sp as usize] =
@@ -273,8 +271,6 @@ impl Process {
             blocking_pid: None,
             sleep_until: 0,
         };
-
-        get_process_new_lock().unlock();
 
         proc
     }
