@@ -12,12 +12,12 @@ use alloc::collections::vec_deque::VecDeque;
 
 pub const IDLE_ID: usize = core::usize::MAX;
 
-pub static mut PROCESS_READY: Option<VecDeque<Process>> = None;
-pub static mut PROCESS_BLOCKED: Option<VecDeque<Process>> = None;
-pub static mut PROCESS_SLEEPING: Option<VecDeque<Process>> = None;
-pub static mut PROCESS_RUNNING: [Option<Process>; 4] = [None, None, None, None];
-pub static mut PROCESS_IDLE: [Option<Process>; 4] = [None, None, None, None];
-pub static mut PROCESS_LIST_LOCK: Mutex = Mutex::new();
+static mut PROCESS_READY: Option<VecDeque<Process>> = None;
+static mut PROCESS_BLOCKED: Option<VecDeque<Process>> = None;
+static mut PROCESS_SLEEPING: Option<VecDeque<Process>> = None;
+static mut PROCESS_RUNNING: [Option<Process>; 4] = [None, None, None, None];
+static mut PROCESS_IDLE: [Option<Process>; 4] = [None, None, None, None];
+static mut PROCESS_LIST_LOCK: Mutex = Mutex::new();
 
 pub fn running_process() -> &'static Process {
     unsafe { PROCESS_RUNNING[cpu::get_mhartid()].as_ref().unwrap() }
@@ -79,15 +79,21 @@ pub fn get_process_list_lock() -> &'static mut Mutex {
     unsafe { &mut PROCESS_LIST_LOCK }
 }
 
-pub static DEFAULT_QUANTUM: usize = 5;
+static DEFAULT_QUANTUM: usize = 1;
 
-pub static mut NEXT_PID: usize = 0;
-pub static mut NEXT_PID_LOCK: Mutex = Mutex::new();
+static mut NEXT_PID: usize = 0;
+static mut NEXT_PID_LOCK: Mutex = Mutex::new();
 
-pub static mut PROCESS_NEW_LOCK: Mutex = Mutex::new();
-
-pub fn get_process_new_lock() -> &'static mut Mutex {
-    unsafe { &mut PROCESS_NEW_LOCK }
+pub fn get_next_pid() -> usize {
+    unsafe {
+        NEXT_PID_LOCK.spin_lock();
+        let pid = {
+            NEXT_PID += 1;
+            NEXT_PID
+        };
+        NEXT_PID_LOCK.unlock();
+        pid
+    }
 }
 
 pub fn init() {
@@ -137,10 +143,7 @@ pub struct Process {
 
 impl Process {
     pub fn new(start: usize, arg0: usize) -> Self {
-        let pid = unsafe {
-            NEXT_PID += 1;
-            NEXT_PID
-        };
+        let pid = get_next_pid();
 
         let page_table_address = page::zalloc(1);
         assert!(page_table_address as *const u8 != core::ptr::null());
@@ -464,7 +467,6 @@ pub fn move_running_process_to_ready() {
 
 pub fn move_running_process_to_blocked() {
     get_process_list_lock().spin_lock();
-
 
     let mut running = running_process_take();
     running.state = ProcessState::Blocked;
