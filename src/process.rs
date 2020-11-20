@@ -5,14 +5,42 @@
 
 use crate::assembly;
 use crate::cpu::{self, CpuMode, TrapFrame};
+use crate::lock::Mutex;
 use crate::page::{self, PageTableEntryFlags, Sv39PageTable};
 
 use alloc::collections::vec_deque::VecDeque;
 
-pub static mut PROCESS_RUNNING: Option<Process> = None;
+pub static mut PROCESS_RUNNING: [Option<Process>; 4] = [None, None, None, None];
 pub static mut PROCESS_LIST: Option<VecDeque<Process>> = None;
+pub static mut PROCESS_LIST_LOCK: Mutex = Mutex::new();
+pub static mut PID_LIST: Option<VecDeque<usize>> = None;
+pub static mut PID_LIST_LOCK: Mutex = Mutex::new();
+
 pub static mut NEXT_PID: usize = 0;
 pub static DEFAULT_QUANTUM: usize = 1;
+
+pub static mut PROCESS_LOCK: Mutex = Mutex::new();
+
+pub static mut PROCESS_IDLE: [Option<Process>; 4] = [None, None, None, None];
+
+pub fn get_process_lock() -> &'static mut Mutex {
+    unsafe { &mut PROCESS_LOCK }
+}
+
+pub fn get_process_list_lock() -> &'static mut Mutex {
+    unsafe { &mut PROCESS_LIST_LOCK }
+}
+
+pub fn get_pid_list_lock() -> &'static mut Mutex {
+    unsafe { &mut PID_LIST_LOCK }
+}
+
+pub fn init() {
+    for process in unsafe { &mut PROCESS_IDLE } {
+        process.replace(Process::new_idle());
+    }
+}
+
 // Process States
 // Tanenbaum, Modern Operating Systems
 // Ready -> Running = picked by scheduler
@@ -46,6 +74,7 @@ pub struct Process {
 impl Process {
     pub fn new(start: usize, arg0: usize) -> Self {
         // cpu::disable_global_interrupts();
+        get_process_lock().spin_lock();
         let mut context = TrapFrame::new();
         context.pc = start as usize;
         context.mode = CpuMode::User as usize;
@@ -138,7 +167,39 @@ impl Process {
             blocking_pid: None,
             sleep_until: 0,
         };
+        get_process_lock().unlock();
+
+        pid_list_add(pid);
         // cpu::enable_global_interrupts();
+        proc
+    }
+
+    pub fn new_idle() -> Self {
+        get_process_lock().spin_lock();
+        let mut context = TrapFrame::new();
+        context.pc = self::idle as usize;
+        context.mode = CpuMode::Machine as usize;
+        context.global_interrupt_enable = 1 << 7;
+
+        let num_stack_pages = 2;
+        let stack = page::zalloc(num_stack_pages) as usize;
+        let stack_end = stack + num_stack_pages * page::PAGE_SIZE;
+
+        context.regs[cpu::GeneralPurposeRegister::Sp as usize] = stack_end;
+
+        let proc = Process {
+            context,
+            stack: stack as *mut u8,
+            state: ProcessState::Ready,
+            page_table: 0 as *mut _,
+            quantum: DEFAULT_QUANTUM,
+            pid: core::usize::MAX,
+            blocking_pid: None,
+            sleep_until: 0,
+        };
+
+        get_process_lock().unlock();
+
         proc
     }
 }
@@ -171,7 +232,7 @@ pub fn exit() {
     unsafe {
         debug!(
             "exiting from pid: {}",
-            PROCESS_RUNNING.as_ref().unwrap().pid
+            PROCESS_RUNNING[cpu::get_hartid()].as_ref().unwrap().pid
         );
     }
     make_user_syscall(0, 0, 0);
@@ -181,7 +242,7 @@ pub fn join(pid: usize) {
     unsafe {
         debug!(
             "Join running.pid: {}, waiting pid {}",
-            PROCESS_RUNNING.as_ref().unwrap().pid,
+            PROCESS_RUNNING[cpu::get_hartid()].as_ref().unwrap().pid,
             pid
         );
     }
@@ -198,6 +259,7 @@ pub fn read_line(buffer: &mut alloc::string::String) {
 }
 
 pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
+    get_process_list_lock().spin_lock();
     if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
         for process in &mut process_list {
             if process.pid == pid {
@@ -208,9 +270,11 @@ pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
             PROCESS_LIST.replace(process_list);
         }
     }
+    get_process_list_lock().unlock();
 }
 
 pub fn wake_process(blocked_pid: usize) {
+    get_process_list_lock().spin_lock();
     if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
         for process in &mut process_list {
             if process.pid == blocked_pid {
@@ -221,9 +285,11 @@ pub fn wake_process(blocked_pid: usize) {
             PROCESS_LIST.replace(process_list);
         }
     }
+    get_process_list_lock().unlock();
 }
 
 pub fn process_list_add(process: Process) {
+    get_process_list_lock().spin_lock();
     if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
         process_list.push_back(process);
 
@@ -239,9 +305,45 @@ pub fn process_list_add(process: Process) {
             PROCESS_LIST.replace(process_list);
         }
     }
+    get_process_list_lock().unlock();
+}
+
+pub fn pid_list_add(pid: usize) {
+    get_pid_list_lock().spin_lock();
+    if let Some(mut pid_list) = unsafe { PID_LIST.take() } {
+        pid_list.push_back(pid);
+
+        unsafe {
+            PID_LIST.replace(pid_list);
+        }
+    } else {
+        let mut pid_list = VecDeque::new();
+
+        pid_list.push_back(pid);
+
+        unsafe {
+            PID_LIST.replace(pid_list);
+        }
+    }
+    get_pid_list_lock().unlock();
+}
+
+pub fn pid_list_remove(removing_pid: usize) {
+    get_pid_list_lock().spin_lock();
+    if let Some(mut pid_list) = unsafe { PID_LIST.take() } {
+        if let Some(position) = pid_list.iter().position(|pid| pid == &removing_pid) {
+            pid_list.remove(position);
+        }
+
+        unsafe {
+            PID_LIST.replace(pid_list);
+        }
+    }
+    get_pid_list_lock().unlock();
 }
 
 pub fn process_list_remove(pid: usize) {
+    get_process_list_lock().spin_lock();
     if let Some(mut process_list) = unsafe { PROCESS_LIST.take() } {
         if let Some(position) = process_list.iter().position(|process| process.pid == pid) {
             process_list.remove(position);
@@ -251,9 +353,11 @@ pub fn process_list_remove(pid: usize) {
             PROCESS_LIST.replace(process_list);
         }
     }
+    get_process_list_lock().unlock();
 }
 
 pub fn process_list_contains(pid: usize) -> bool {
+    get_process_list_lock().spin_lock();
     let mut contains = false;
     if let Some(process_list) = unsafe { PROCESS_LIST.take() } {
         if let Some(_) = process_list.iter().position(|process| process.pid == pid) {
@@ -264,11 +368,32 @@ pub fn process_list_contains(pid: usize) -> bool {
             PROCESS_LIST.replace(process_list);
         }
     }
+    get_process_list_lock().unlock();
+    contains
+}
+
+pub fn pid_list_contains(checking_pid: usize) -> bool {
+    get_pid_list_lock().spin_lock();
+    let mut contains = false;
+    if let Some(pid_list) = unsafe { PID_LIST.take() } {
+        if let Some(_) = pid_list.iter().position(|pid| pid == &checking_pid) {
+            contains = true;
+        }
+
+        unsafe {
+            PID_LIST.replace(pid_list);
+        }
+    }
+    get_pid_list_lock().unlock();
     contains
 }
 
 pub fn switch_to_user(process: &Process) -> ! {
-    debug!("switch_to_user: {}", process.pid);
+    debug!(
+        "switching to user for hart {} pid {}...",
+        cpu::get_hartid(),
+        process.pid
+    );
     unsafe { assembly::__tong_os_switch_to_user(process) }
 }
 
@@ -280,5 +405,11 @@ pub fn print_process_list() {
         unsafe {
             PROCESS_LIST.replace(process_list);
         }
+    }
+}
+
+pub fn idle() {
+    loop {
+        unsafe { asm!("wfi") }
     }
 }

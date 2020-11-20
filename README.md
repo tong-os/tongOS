@@ -5,7 +5,7 @@ Projeto final para a disciplina INE5424 - Sistemas Operacionais II. **tongOS** �
 Principal referência de implementação: Stephen Marz¹.
 
 ## Versão
-0.2
+0.3
 
 
 ## Instalação
@@ -29,9 +29,10 @@ Para pontos de entrega e como visualizar, veja __entrega__ e __visualização__.
 
 ## Entrega
 Para a segunda entrega do projeto, é necessário cobrir os seguintes tópicos:
-1. Corretude na inicialização e configuração do(s) Timer(s), incluindo handler com eoi e configuração de alarmes.
-2. Corretude no tratamento de interrupções.
-3. Demonstrando o funcionamento do escalonador com preempção por Timer, com possibilidade de configuração do tempo necessário para preempção
+1. Corretude na inicialização do Sistema Operacional multicore.
+2. Corretude de operações atômicas.
+3. Corretude na configuração de timers e tratamento de interrupções.
+4. Funcionamento do escalonador multicore global e preemptivo.
 
 ## Visualização
 Os testes para a segunda entrega estão apresentados no arquivo `assigment.rs`, chamados pela função `kinit()` em `main.rs`.
@@ -45,13 +46,15 @@ Com `PROCESS_TO_RUN` você pode escolher qual processo/app executar. As opções
 
 
 ## Pontos importantes para a entrega
-Para habilitar a preempção, criamos a variável `ENABLE_PREEMPTION`, também em `lib.rs`. Quando habilitada, o sistema tratará (e escalonará) 
-as interrupções de relógio. O tempo de interrupção de relógio é definido por (`CONTEXT_SWITCH_TIME` * `process.quantum`). É possível alterar o
-`CONTEXT_SWITCH_TIME` em `cpu.rs` e o `quantum` do processo em `process.rs`. Atualmente, todos os processos são inicializados com o mesmo `quantum` padrão.
-O escalonador funciona como `Round-Robin` quando a preempção está habilitada; caso contrário, funciona como `First Come, First Served`.
+A execução com 4 harts está **hardcoded**, por algumas razões. É possível verificar que o `qemu` chama `-smp 4` em `.cargo/config`. 
 
-Para testar interrupções externas, criamos uma `syscall` para receber inputs do teclado, através do `read_line`. Essa `syscall` habilita a PLIC para que 
-seja possível receber interrupções externas, posteriormente tratadas em `trap.rs`. O app [3] demonstra a execução. 
+A inicialização das outras harts já era feito anteriormente no processo de `boot`. Essa parte está em `entry.S`. Adicionalmente, adicionamos, na função `kinit()` em `main.rs`, a "finalização" do setup das outras harts. Todas as harts, com exceção da 0, ficam em `wfi` até que a **hart 0** termine a incialização do sistema e acorde-as, através de interrupções de software (`wake_all_harts()`, em `trap.rs`).
+
+As operações atômicas ocorrem em todo o sistema, utilizando-se da implementação de Mutex, em `lock.rs`. O maior uso delas consiste na lista de processos, já que seria inviável uma execução correta sem atomicidade no seu acesso.
+
+Adicionamos o tratamento de interrupção de software para lidar com o setup inicial das harts diferentes de 0. Nesse sentido, as harts, ao não encontrarem nenhum processo disponível para escalonamento, executarão o processo `IDLE`. A cada interrupção de relógio, as harts checam no escalonador se existe algum processo disponível. Como cada hart contém seu próprio `MTIMECMP`, as interrupções são escalonadas em seu respectivo registrador (`schedule_machine_timer_interrupt` em `trap.rs`).
+
+O escalonador funciona para todas as harts com preempção ligada (default do sistema). 
 
 ## Como debugar
 ```

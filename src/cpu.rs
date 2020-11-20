@@ -97,7 +97,7 @@ pub struct TrapFrame {
     pub fregs: [usize; 32],
     pub satp: usize,
     pub pc: usize,
-    pub hartid: usize,
+    pub global_interrupt_enable: usize,
     pub mode: usize,
 }
 
@@ -108,7 +108,7 @@ impl TrapFrame {
             fregs: [0; 32],
             satp: 0,
             pc: 0,
-            hartid: 0,
+            global_interrupt_enable: 0,
             mode: 0,
         }
     }
@@ -126,7 +126,7 @@ pub const fn build_satp(asid: usize, pysical_address: usize) -> usize {
 }
 
 pub fn disable_global_interrupts() {
-    println!("disable!");
+    debug!("Disable global interrupts for hart {}!", get_hartid());
     unsafe {
         let mstatus: usize;
         asm!("csrr {}, mstatus", out(reg) mstatus);
@@ -136,12 +136,20 @@ pub fn disable_global_interrupts() {
 }
 
 pub fn enable_global_interrupts() {
-    println!("enable");
+    debug!("Enable global interrupts for hart {}!", get_hartid());
     unsafe {
-        let mstatus: usize;
-        asm!("csrr {}, mstatus", out(reg) mstatus);
+        // let mstatus: usize;
+        // asm!("csrr {}, mstatus", out(reg) mstatus);
         // [3] = MIE (Machine Interrupt Enable)
-        let mstatus = mstatus | (1 << 3);
+        let mstatus = 1 << 3;
         asm!("csrw mstatus, {}", in(reg) mstatus);
+    }
+}
+
+pub fn get_hartid() -> usize {
+    unsafe {
+        let hartid: usize;
+        asm!("csrr {}, mhartid", out(reg) hartid);
+        hartid
     }
 }

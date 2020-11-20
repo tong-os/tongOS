@@ -46,6 +46,7 @@ use crate::process;
 pub fn example_process1(test: usize) -> () {
     println!("Example process 1");
     println!("YEAH, we're running as user with virtual address translation!");
+
     println!("Arg: {}", test);
 
     println!("exiting process");
@@ -61,6 +62,7 @@ pub fn example_process2() -> () {
 
 pub fn example_process3(iteration: usize) {
     println!("Example process 3!");
+
     println!("Counting for {}", iteration);
     let mut my_counter = 0;
     for _ in 0..iteration {

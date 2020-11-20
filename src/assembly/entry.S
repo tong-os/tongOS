@@ -25,14 +25,12 @@ partition_stack_between_harts:
     la t1, _stack_size
 set_hart_stack_pointer:
     beq t0, a0, call_kinit
-    add sp, sp, t1
+    sub sp, sp, t1
     addi t0, t0, 1
     j set_hart_stack_pointer
 
 call_kinit:
     csrr a0, mhartid
-    li a1, 0
-    li a2, 0
     call kinit
 
 return_from_kinit_is_error:
