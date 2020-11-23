@@ -12,12 +12,12 @@ use alloc::collections::vec_deque::VecDeque;
 
 pub const IDLE_ID: usize = core::usize::MAX;
 
-static mut PROCESS_READY: Option<VecDeque<Process>> = None;
-static mut PROCESS_BLOCKED: Option<VecDeque<Process>> = None;
-static mut PROCESS_SLEEPING: Option<VecDeque<Process>> = None;
+static mut PROCESS_READY: [Option<VecDeque<Process>>; 4] = [None, None, None, None];
+static mut PROCESS_BLOCKED: [Option<VecDeque<Process>>; 4] = [None, None, None, None];
+static mut PROCESS_SLEEPING: [Option<VecDeque<Process>>; 4] = [None, None, None, None];
 static mut PROCESS_RUNNING: [Option<Process>; 4] = [None, None, None, None];
 static mut PROCESS_IDLE: [Option<Process>; 4] = [None, None, None, None];
-static mut PROCESS_LIST_LOCK: Mutex = Mutex::new();
+static mut PROCESS_LIST_LOCK: [Mutex; 4] = [Mutex::new(); 4];
 
 pub fn running_process() -> &'static Process {
     unsafe { PROCESS_RUNNING[cpu::get_mhartid()].as_ref().unwrap() }
@@ -52,31 +52,31 @@ fn running_list_mut() -> &'static mut [Option<Process>] {
 }
 
 fn ready_list() -> &'static VecDeque<Process> {
-    unsafe { PROCESS_READY.as_ref().unwrap() }
+    unsafe { PROCESS_READY[cpu::get_mhartid()].as_ref().unwrap() }
 }
 
 pub fn ready_list_mut() -> &'static mut VecDeque<Process> {
-    unsafe { PROCESS_READY.as_mut().unwrap() }
+    unsafe { PROCESS_READY[cpu::get_mhartid()].as_mut().unwrap() }
 }
 
 fn blocked_list() -> &'static VecDeque<Process> {
-    unsafe { PROCESS_BLOCKED.as_ref().unwrap() }
+    unsafe { PROCESS_BLOCKED[cpu::get_mhartid()].as_ref().unwrap() }
 }
 
 fn blocked_list_mut() -> &'static mut VecDeque<Process> {
-    unsafe { PROCESS_BLOCKED.as_mut().unwrap() }
+    unsafe { PROCESS_BLOCKED[cpu::get_mhartid()].as_mut().unwrap() }
 }
 
 fn sleeping_list() -> &'static VecDeque<Process> {
-    unsafe { PROCESS_SLEEPING.as_ref().unwrap() }
+    unsafe { PROCESS_SLEEPING[cpu::get_mhartid()].as_ref().unwrap() }
 }
 
 fn sleeping_list_mut() -> &'static mut VecDeque<Process> {
-    unsafe { PROCESS_SLEEPING.as_mut().unwrap() }
+    unsafe { PROCESS_SLEEPING[cpu::get_mhartid()].as_mut().unwrap() }
 }
 
 pub fn get_process_list_lock() -> &'static mut Mutex {
-    unsafe { &mut PROCESS_LIST_LOCK }
+    unsafe { &mut PROCESS_LIST_LOCK[cpu::get_mhartid()] }
 }
 
 static DEFAULT_QUANTUM: usize = 1;
@@ -98,13 +98,19 @@ pub fn get_next_pid() -> usize {
 
 pub fn init() {
     unsafe {
-        PROCESS_READY.replace(VecDeque::new());
+        for list in PROCESS_READY.as_mut().iter_mut() {
+            list.replace(VecDeque::new());
+        }
     }
     unsafe {
-        PROCESS_SLEEPING.replace(VecDeque::new());
+        for list in PROCESS_SLEEPING.as_mut().iter_mut() {
+            list.replace(VecDeque::new());
+        }
     }
     unsafe {
-        PROCESS_BLOCKED.replace(VecDeque::new());
+        for list in PROCESS_BLOCKED.as_mut().iter_mut() {
+            list.replace(VecDeque::new());
+        }
     }
     for process in unsafe { &mut PROCESS_IDLE } {
         process.replace(Process::new_idle());
@@ -181,12 +187,6 @@ impl Process {
                     0,
                 );
             }
-            (*page_table).map(
-                0x1000_0000,
-                0x1000_0000,
-                PageTableEntryFlags::UserReadWrite as usize,
-                0,
-            );
             for address in (assembly::RODATA_START..assembly::RODATA_END).step_by(page::PAGE_SIZE) {
                 (*page_table).map(
                     address as usize,

@@ -102,12 +102,12 @@ extern "C" fn kinit(hartid: usize) -> ! {
 
         println!("README was updated with new features! Did you read it?");
 
-        tong_os::assignment::choose_processes(tong_os::PROCESS_TO_RUN);
-
         unsafe {
             asm!("fence");
             MAY_BOOT = true;
         }
+
+        tong_os::assignment::choose_processes(tong_os::PROCESS_TO_RUN);
 
         tong_os::scheduler::schedule();
     } else {
@@ -118,6 +118,8 @@ extern "C" fn kinit(hartid: usize) -> ! {
         }
 
         tong_os::trap::init();
+
+        tong_os::assignment::choose_processes(tong_os::PROCESS_TO_RUN);
 
         tong_os::scheduler::schedule();
     }

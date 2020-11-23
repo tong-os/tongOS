@@ -78,6 +78,7 @@ pub fn wake_all_idle_harts() {
     process::get_process_list_lock().unlock();
 }
 
+
 // CLINT Memory Map
 // https://sifive.cdn.prismic.io/sifive/b5e7a29c-d3c2-44ea-85fb-acc1df282e21_FU540-C000-v1p3.pdf
 pub const MMIO_MTIMECMP: *mut u64 = 0x0200_4000usize as *mut u64;
@@ -149,10 +150,13 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                     cause,
                     process::get_running_process_pid()
                 );
-                if process::try_wake_sleeping() {
-                    wake_all_idle_harts();
-                }
+                let has_awaken = process::try_wake_sleeping();
+
                 if process::get_running_process_pid() == process::IDLE_ID {
+                    if has_awaken {
+                        process::move_running_process_to_idle();
+                        scheduler::schedule();
+                    }
                     schedule_machine_timer_interrupt(1);
                     process::switch_to_process(trap_frame);
                 } else {
@@ -240,7 +244,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         if let Some(blocked) = process::get_running_process_blocking_pid() {
                             debug!("waking blocked: {}", blocked);
                             process::move_blocked_process_to_ready(blocked);
-                            wake_all_idle_harts();
+                            // wake_all_idle_harts();
                         }
                         process::delete_running_process();
                         scheduler::schedule();
@@ -260,7 +264,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                                 new_process_pid;
                             (*trap_frame).pc += 4;
                         }
-                        wake_all_idle_harts();
+                        // wake_all_idle_harts();
                         process::switch_to_process(trap_frame);
                     }
                     // Joining thread
