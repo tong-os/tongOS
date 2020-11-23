@@ -78,7 +78,6 @@ pub fn wake_all_idle_harts() {
     process::get_process_list_lock().unlock();
 }
 
-
 // CLINT Memory Map
 // https://sifive.cdn.prismic.io/sifive/b5e7a29c-d3c2-44ea-85fb-acc1df282e21_FU540-C000-v1p3.pdf
 pub const MMIO_MTIMECMP: *mut u64 = 0x0200_4000usize as *mut u64;
@@ -254,9 +253,18 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         debug!("handling create thread");
                         let process_address =
                             unsafe { (*trap_frame).regs[GeneralPurposeRegister::A1 as usize] };
-                        let process_arg =
+                        let process_arg0 =
                             unsafe { (*trap_frame).regs[GeneralPurposeRegister::A2 as usize] };
-                        let new_process = process::Process::new(process_address, process_arg);
+                        let process_arg1 =
+                            unsafe { (*trap_frame).regs[GeneralPurposeRegister::A3 as usize] };
+                        let process_arg2 =
+                            unsafe { (*trap_frame).regs[GeneralPurposeRegister::A4 as usize] };
+                        let new_process = process::Process::new(
+                            process_address,
+                            process_arg0,
+                            process_arg1,
+                            process_arg2,
+                        );
                         let new_process_pid = new_process.pid;
                         process::process_list_add(new_process);
                         unsafe {
@@ -363,6 +371,17 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         };
 
                         println!("hart {}: {}", cpu::get_mhartid(), slice);
+                        process::switch_to_process(trap_frame);
+                    }
+                    // get time
+                    6 => {
+                        debug!("handling print str");
+                        unsafe {
+                            (*trap_frame).regs[GeneralPurposeRegister::A0 as usize] =
+                                get_mtime() as usize;
+                            (*trap_frame).pc += 4;
+                        }
+
                         process::switch_to_process(trap_frame);
                     }
                     code => {

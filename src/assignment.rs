@@ -84,30 +84,30 @@ pub fn example_process3(iteration: usize) {
 pub fn choose_processes(process_to_run: usize) {
     match process_to_run {
         1 => {
-            let process = process::Process::new(example_process1 as usize, 666);
+            let process = process::Process::new(example_process1 as usize, 666, 0, 0);
             process::process_list_add(process);
-            let process = process::Process::new(example_process2 as usize, 0);
+            let process = process::Process::new(example_process2 as usize, 0, 0, 0);
             process::process_list_add(process);
-            let process = process::Process::new(example_process3 as usize, 666);
+            let process = process::Process::new(example_process3 as usize, 666, 0, 0);
             process::process_list_add(process);
-            let process = process::Process::new(example_process3 as usize, 42);
+            let process = process::Process::new(example_process3 as usize, 42, 0, 0);
             process::process_list_add(process);
         }
         2 => {
-            let process = process::Process::new(crate::app::philosopher::main as usize, 0);
+            let process = process::Process::new(crate::app::philosopher::main as usize, 0, 0, 0);
             process::process_list_add(process);
         }
         3 => {
-            let process = process::Process::new(crate::app::input_example::main as usize, 0);
+            let process = process::Process::new(crate::app::input_example::main as usize, 0, 0, 0);
             process::process_list_add(process);
         }
         4 => {
             // choose_processes(1);
             // choose_processes(3);
-            let process = process::Process::new(example_process1 as usize, 666);
+            let process = process::Process::new(example_process1 as usize, 666, 0, 0);
             process::process_list_add(process);
             choose_processes(2);
-            let process = process::Process::new(example_process2 as usize, 0);
+            let process = process::Process::new(example_process2 as usize, 0, 0, 0);
             process::process_list_add(process);
         }
         _ => {

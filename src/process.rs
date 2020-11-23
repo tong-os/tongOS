@@ -148,7 +148,7 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(start: usize, arg0: usize) -> Self {
+    pub fn new(start: usize, arg0: usize, arg1: usize, arg2: usize) -> Self {
         let pid = get_next_pid();
 
         let page_table_address = page::zalloc(1);
@@ -156,6 +156,8 @@ impl Process {
 
         let mut context = TrapFrame::new();
         context.regs[cpu::GeneralPurposeRegister::A0 as usize] = arg0;
+        context.regs[cpu::GeneralPurposeRegister::A1 as usize] = arg1;
+        context.regs[cpu::GeneralPurposeRegister::A2 as usize] = arg2;
         context.satp = cpu::build_satp(pid, page_table_address as usize);
         context.pc = start as usize;
         context.global_interrupt_enable = 0;
@@ -292,14 +294,14 @@ impl Drop for Process {
     }
 }
 
-fn make_user_syscall(_arg0: usize, _arg1: usize, _arg2: usize) {
+fn make_user_syscall(_arg0: usize, _arg1: usize, _arg2: usize, _arg3: usize, _arg4: usize) {
     unsafe {
         asm!("ECALL");
     }
 }
 
-pub fn create_thread(func: usize, arg0: usize) -> usize {
-    make_user_syscall(1, func, arg0);
+pub fn create_thread(func: usize, arg0: usize, arg1: usize, arg2: usize) -> usize {
+    make_user_syscall(1, func, arg0, arg1, arg2);
     let pid: usize;
     unsafe {
         asm!("mv {}, a0", out(reg) pid);
@@ -308,24 +310,33 @@ pub fn create_thread(func: usize, arg0: usize) -> usize {
 }
 
 pub fn exit() {
-    make_user_syscall(0, 0, 0);
+    make_user_syscall(0, 0, 0, 0, 0);
 }
 
 pub fn join(pid: usize) {
-    make_user_syscall(2, pid, 0);
+    make_user_syscall(2, pid, 0, 0, 0);
 }
 
 pub fn sleep(amount: usize) {
-    make_user_syscall(3, amount, 0);
+    make_user_syscall(3, amount, 0, 0, 0);
 }
 
 pub fn read_line(buffer: &mut alloc::string::String) {
-    make_user_syscall(4, buffer as *mut _ as usize, 0);
+    make_user_syscall(4, buffer as *mut _ as usize, 0, 0, 0);
     while unsafe { crate::uart::READING } {}
 }
 
 pub fn print_str(buffer: &str) {
-    make_user_syscall(5, buffer.as_ptr() as usize, buffer.len());
+    make_user_syscall(5, buffer.as_ptr() as usize, buffer.len(), 0, 0);
+}
+
+pub fn time_now() -> usize {
+    make_user_syscall(6, 0, 0, 0, 0);
+    let time: usize;
+    unsafe {
+        asm!("mv {}, a0", out(reg) time);
+    }
+    time
 }
 
 pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
