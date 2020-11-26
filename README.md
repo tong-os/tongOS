@@ -5,7 +5,7 @@ Projeto final para a disciplina INE5424 - Sistemas Operacionais II. **tongOS** �
 Principal referência de implementação: Stephen Marz¹.
 
 ## Versão
-0.3
+0.4
 
 
 ## Instalação
@@ -29,10 +29,8 @@ Para pontos de entrega e como visualizar, veja __entrega__ e __visualização__.
 
 ## Entrega
 Para a segunda entrega do projeto, é necessário cobrir os seguintes tópicos:
-1. Corretude na inicialização do Sistema Operacional multicore.
-2. Corretude de operações atômicas.
-3. Corretude na configuração de timers e tratamento de interrupções.
-4. Funcionamento do escalonador multicore global e preemptivo.
+1. Corretude do Sistema Operacional na execução com processador multicore
+2. Corretude na execução da política de escalonamento particionado: "Threads criadas em uma partição sejam sempre alocadas ao mesmo core".
 
 ## Visualização
 Os testes para a segunda entrega estão apresentados no arquivo `assigment.rs`, chamados pela função `kinit()` em `main.rs`.
@@ -48,13 +46,14 @@ Com `PROCESS_TO_RUN` você pode escolher qual processo/app executar. As opções
 ## Pontos importantes para a entrega
 A execução com 4 harts está **hardcoded**, por algumas razões. É possível verificar que o `qemu` chama `-smp 4` em `.cargo/config`. 
 
-A inicialização das outras harts já era feito anteriormente no processo de `boot`. Essa parte está em `entry.S`. Adicionalmente, adicionamos, na função `kinit()` em `main.rs`, a "finalização" do setup das outras harts. Todas as harts, com exceção da 0, ficam em `wfi` até que a **hart 0** termine a incialização do sistema e acorde-as, através de interrupções de software (`wake_all_harts()`, em `trap.rs`).
+A inicialização das outras harts já era feito anteriormente no processo de `boot`. Essa parte está em `entry.S`. Adicionalmente, adicionamos, na função `kinit()` em `main.rs`, a "finalização" do setup das outras harts. Todas as harts, com exceção da 0, esperam até que a **hart 0** termine a inicialização do sistema e acorde-as, através da variável `MAY_BOOT`, permitindo que escalonem algum processo. Para não atrapalhar o funcionamento de outras harts, não são executadas interrupções entre harts no momento, mesmo que tenhamos o suporte para tal (`wake_all_idle_harts`, comentada por hora).
 
-As operações atômicas ocorrem em todo o sistema, utilizando-se da implementação de Mutex, em `lock.rs`. O maior uso delas consiste na lista de processos, já que seria inviável uma execução correta sem atomicidade no seu acesso.
+Adaptamos o sistema para mostar, ao printar, a hart corrente e o pid do processo que está realizando essa saída.
 
-Adicionamos o tratamento de interrupção de software para lidar com o setup inicial das harts diferentes de 0. Nesse sentido, as harts, ao não encontrarem nenhum processo disponível para escalonamento, executarão o processo `IDLE`. A cada interrupção de relógio, as harts checam no escalonador se existe algum processo disponível. Como cada hart contém seu próprio `MTIMECMP`, as interrupções são escalonadas em seu respectivo registrador (`schedule_machine_timer_interrupt` em `trap.rs`).
+Para esta entrega, decidimos executar o mesmo processo em todas as harts, mas de forma independente. Desse modo, cada hart possui suas próprias filas: `ready, blocked e sleeping`. Além disso, contamos com 4 espaços reservados para processos `running` e `idle`, de suas respectivas harts.
 
-O escalonador funciona para todas as harts com preempção ligada (default do sistema). 
+Cada hart possui `locks` respectivos para suas próprias filas e listas. Desse modo, ao interagir, apenas  as que estiverem em seu comando serão bloqueadas e manipuladas. É possível visualizar este funcionamento atráves do Jantar dos Filósofos, verificando que os pids são propriedade apenas de uma hart específica.
+
 
 ## Como debugar
 ```
