@@ -366,7 +366,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                             core::str::from_utf8_unchecked(slice)
                         };
 
-                        println!("hart {}: {}", cpu::get_mhartid(), slice);
+                        println!("hart {}: pid {}: {}", cpu::get_mhartid(), process::get_running_process_pid(), slice);
                         process::switch_to_process(trap_frame);
                     }
                     // get time
