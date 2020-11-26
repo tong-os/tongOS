@@ -395,7 +395,7 @@ pub fn try_wake_sleeping() -> bool {
     woken
 }
 
-pub fn move_blocked_process_to_ready(blocked_pid: usize) {
+pub fn unblock_process_by_pid(blocked_pid: usize) {
     get_process_list_lock().spin_lock();
 
     if let Some(pos) = blocked_list().iter().position(|p| p.pid == blocked_pid) {
@@ -465,7 +465,8 @@ pub fn get_running_process_pid() -> usize {
     pid
 }
 
-pub fn move_running_process_to_ready() {
+// takes the running process and put in the ready list
+pub fn yield_running_process() {
     get_process_list_lock().spin_lock();
 
     let mut running = running_process_take();
@@ -476,7 +477,7 @@ pub fn move_running_process_to_ready() {
     get_process_list_lock().unlock();
 }
 
-pub fn move_running_process_to_blocked() {
+pub fn block_process() {
     get_process_list_lock().spin_lock();
 
     let mut running = running_process_take();
@@ -487,7 +488,7 @@ pub fn move_running_process_to_blocked() {
     get_process_list_lock().unlock();
 }
 
-pub fn move_running_process_to_sleeping(until: usize) {
+pub fn put_process_to_sleep(until: usize) {
     get_process_list_lock().spin_lock();
 
     let mut running = running_process_take();
@@ -499,7 +500,8 @@ pub fn move_running_process_to_sleeping(until: usize) {
     get_process_list_lock().unlock();
 }
 
-pub fn move_running_process_to_idle() {
+// takes the running idle and give back to idle list
+pub fn yield_idle_process() {
     get_process_list_lock().spin_lock();
 
     let mut running = running_process_take();

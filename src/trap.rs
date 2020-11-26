@@ -139,7 +139,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                     process::get_running_process_pid()
                 );
 
-                process::move_running_process_to_idle();
+                process::yield_idle_process();
                 scheduler::schedule();
             }
             7 => {
@@ -153,15 +153,15 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
 
                 if process::get_running_process_pid() == process::IDLE_ID {
                     if has_awaken {
-                        process::move_running_process_to_idle();
+                        process::yield_idle_process();
                         scheduler::schedule();
                     }
                     schedule_machine_timer_interrupt(1);
                     process::switch_to_process(trap_frame);
                 } else {
-                    process::move_running_process_to_ready();
+                    process::yield_running_process();
+                    scheduler::schedule();
                 }
-                scheduler::schedule();
             }
             11 => unsafe {
                 debug!("Handling external interrupt!");
@@ -242,7 +242,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         // Check if child process needs to reschedule parent
                         if let Some(blocked) = process::get_running_process_blocking_pid() {
                             debug!("waking blocked: {}", blocked);
-                            process::move_blocked_process_to_ready(blocked);
+                            process::unblock_process_by_pid(blocked);
                             // wake_all_idle_harts();
                         }
                         process::delete_running_process();
@@ -288,16 +288,12 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         // if joining pid has already exited
                         if !process::process_list_contains(joining_pid) {
                             debug!("not contains");
-                            // add runnign to proc list as readdy and schedule
-                            // process::update_running_process_to_ready();
-                            // scheduler::schedule();
                             process::switch_to_process(trap_frame);
                         } else {
                             debug!("contains");
                             let blocking_pid = process::get_running_process_pid();
                             process::set_blocking_pid(joining_pid, blocking_pid);
-                            process::move_running_process_to_blocked();
-                            debug!("contains");
+                            process::block_process();
                             scheduler::schedule();
                         }
                     }
@@ -313,7 +309,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                             get_mtime() as usize + amount * cpu::CONTEXT_SWITCH_TIME as usize;
 
                         if crate::ENABLE_PREEMPTION {
-                            process::move_running_process_to_sleeping(until);
+                            process::put_process_to_sleep(until);
                             scheduler::schedule();
                         } else {
                             // sleep
