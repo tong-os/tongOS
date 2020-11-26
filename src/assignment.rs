@@ -102,13 +102,9 @@ pub fn choose_processes(process_to_run: usize) {
             process::process_list_add(process);
         }
         4 => {
-            // choose_processes(1);
-            // choose_processes(3);
-            let process = process::Process::new(example_process1 as usize, 666, 0, 0);
-            process::process_list_add(process);
+            choose_processes(1);
+            choose_processes(3);
             choose_processes(2);
-            let process = process::Process::new(example_process2 as usize, 0, 0, 0);
-            process::process_list_add(process);
         }
         _ => {
             println!("Process not found!");

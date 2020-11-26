@@ -38,7 +38,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
             info.message().unwrap()
         );
     } else {
-        println!("no information available.");
+        println!("Aborting: no information available.");
     }
     abort();
 }
