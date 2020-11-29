@@ -14,7 +14,6 @@
 
 use tong_os::{print, println};
 
-#[macro_use]
 extern crate alloc;
 
 #[cfg(test)]
@@ -32,7 +31,8 @@ extern "C" fn eh_personality() {}
 fn panic(info: &core::panic::PanicInfo) -> ! {
     if let Some(p) = info.location() {
         println!(
-            "Aborting: line {}, file {}: {}",
+            "hart {}: Aborting: line {}, file {}: {}",
+            tong_os::cpu::get_mhartid(),
             p.line(),
             p.file(),
             info.message().unwrap()
@@ -54,6 +54,8 @@ extern "C" fn abort() -> ! {
 
 use tong_os::assembly::*;
 use tong_os::assignment;
+
+static mut MAY_BOOT: bool = false;
 
 #[no_mangle]
 extern "C" fn kinit(hartid: usize) -> ! {
@@ -100,26 +102,25 @@ extern "C" fn kinit(hartid: usize) -> ! {
 
         println!("README was updated with new features! Did you read it?");
 
+        unsafe {
+            asm!("fence");
+            MAY_BOOT = true;
+        }
+
         tong_os::assignment::choose_processes(tong_os::PROCESS_TO_RUN);
 
-        tong_os::trap::wake_all_harts();
-
-        if let Some(next_process) = tong_os::scheduler::schedule() {
-            tong_os::trap::schedule_machine_timer_interrupt(next_process.quantum);
-            tong_os::process::switch_to_user(&next_process);
-        }
-        loop {}
+        tong_os::scheduler::schedule();
     } else {
-        unsafe { asm!("csrw mtvec, {}", in(reg) (__tong_os_trap_from_machine as usize)) }
-
-        let flags = 1 << 3;
-        unsafe { asm!("csrw mie, {}", in(reg) flags) }
-
-        tong_os::cpu::enable_global_interrupts();
-
-        println!("hart {} will wait", hartid);
         loop {
-            unsafe { asm!("wfi") }
+            if unsafe { MAY_BOOT } == true {
+                break;
+            }
         }
+
+        tong_os::trap::init();
+
+        tong_os::assignment::choose_processes(tong_os::PROCESS_TO_RUN);
+
+        tong_os::scheduler::schedule();
     }
 }

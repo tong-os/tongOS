@@ -3,23 +3,49 @@
 // Stephen Marz
 // tongOS team
 
-use crate::cpu::{self, GeneralPurposeRegister};
+use crate::cpu::{self, GeneralPurposeRegister, TrapFrame};
 use crate::plic;
-use crate::process::{self, Process};
-use crate::scheduler::schedule;
+use crate::process;
+use crate::scheduler;
 use crate::uart;
 
 pub fn init() {
-    use crate::assembly::__tong_os_trap;
+    use crate::assembly::__tong_os_trap_machine_mode;
 
-    unsafe { asm!("csrw mtvec, {}", in(reg) (__tong_os_trap as usize)) }
-
-    // configure mstatus
-    // enable_global_interrupts();
+    unsafe { asm!("csrw mtvec, {}", in(reg) (__tong_os_trap_machine_mode as usize)) }
 
     // [7] = MTIE (Machine Time Interrupt Enable)
+    // [3] = MSIE (Machine Software Interrupt Enable)
     let flags = 1 << 7 | 1 << 3;
     unsafe { asm!("csrw mie, {}", in(reg) flags) }
+}
+
+pub fn disable_machine_timer_interrupt() {
+    let flags: usize;
+    unsafe { asm!("csrr {}, mie", out(reg) flags) }
+    let flags_mask = !(1 << 7);
+    unsafe { asm!("csrw mie, {}", in(reg) flags & flags_mask) }
+}
+
+pub fn enable_machine_timer_interrupt() {
+    let flags: usize;
+    unsafe { asm!("csrr {}, mie", out(reg) flags) }
+    let flags_mask = 1 << 7;
+    unsafe { asm!("csrw mie, {}", in(reg) flags | flags_mask) }
+}
+
+pub fn disable_machine_software_interrupt() {
+    let flags: usize;
+    unsafe { asm!("csrr {}, mie", out(reg) flags) }
+    let flags_mask = !(1 << 3);
+    unsafe { asm!("csrw mie, {}", in(reg) flags & flags_mask) }
+}
+
+pub fn enable_machine_software_interrupt() {
+    let flags: usize;
+    unsafe { asm!("csrr {}, mie", out(reg) flags) }
+    let flags_mask = 1 << 3;
+    unsafe { asm!("csrw mie, {}", in(reg) flags | flags_mask) }
 }
 
 fn send_software_interrupt(hartid: usize) {
@@ -30,7 +56,7 @@ fn send_software_interrupt(hartid: usize) {
     }
 }
 
-fn complete_software_interrupt(hartid: usize) {
+pub fn complete_software_interrupt(hartid: usize) {
     let clint_base = 0x200_0000 as *mut u32;
 
     unsafe {
@@ -38,11 +64,18 @@ fn complete_software_interrupt(hartid: usize) {
     }
 }
 
-pub fn wake_all_harts() {
-    for i in 1..4 {
-        debug!("waking hart {}", i);
-        send_software_interrupt(i);
+pub fn wake_all_idle_harts() {
+    process::get_process_list_lock().spin_lock();
+    for (hartid, running) in process::running_list().iter().enumerate() {
+        process::print_process_list();
+        if let Some(running) = running {
+            if running.pid == process::IDLE_ID {
+                debug!("waking hart {}", hartid);
+                send_software_interrupt(hartid);
+            }
+        }
     }
+    process::get_process_list_lock().unlock();
 }
 
 // CLINT Memory Map
@@ -50,10 +83,18 @@ pub fn wake_all_harts() {
 pub const MMIO_MTIMECMP: *mut u64 = 0x0200_4000usize as *mut u64;
 pub const MMIO_MTIME: *const u64 = 0x0200_BFF8 as *const u64;
 
+pub fn get_mtime() -> u64 {
+    unsafe { MMIO_MTIME.read_volatile() }
+}
+
+pub fn get_mtimecmp() -> u64 {
+    unsafe { MMIO_MTIMECMP.read_volatile() }
+}
+
 pub fn schedule_machine_timer_interrupt(quantum: usize) {
     unsafe {
         if crate::ENABLE_PREEMPTION {
-            MMIO_MTIMECMP.add(cpu::get_hartid()).write_volatile(
+            MMIO_MTIMECMP.add(cpu::get_mhartid()).write_volatile(
                 MMIO_MTIME
                     .read_volatile()
                     .wrapping_add(cpu::CONTEXT_SWITCH_TIME * quantum as u64),
@@ -63,13 +104,21 @@ pub fn schedule_machine_timer_interrupt(quantum: usize) {
 }
 
 #[no_mangle]
-pub fn tong_os_trap(process: &mut Process) {
-    let mcause: usize;
+pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
+    process::update_running_process_trap_frame(trap_frame);
     unsafe {
-        asm!("csrr {}, mcause", out(reg) mcause);
+        debug!(
+            "trap: mcause: {:x}, MIE {}, MPIE {}, pid {}, global_interrupt_enable {}, mode: {:?}, ",
+            cpu::get_mcause(),
+            (cpu::get_mstatus() & 1 << 3) >> 3,
+            (cpu::get_mstatus() & 1 << 7) >> 7,
+            process::get_running_process_pid(),
+            (*trap_frame).global_interrupt_enable,
+            (*trap_frame).mode
+        );
     }
-    debug!("In tongo_os_trap!");
 
+    let mcause = cpu::get_mcause();
     // Get interrupt bit from mcause
     let is_async = mcause >> 63 & 1 == 1;
     // Get interrupt cause
@@ -78,49 +127,47 @@ pub fn tong_os_trap(process: &mut Process) {
     if is_async {
         match cause {
             3 => {
-                complete_software_interrupt(cpu::get_hartid());
-                cpu::disable_global_interrupts();
-                self::init();
+                complete_software_interrupt(cpu::get_mhartid());
                 debug!(
                     "Handling asyng software interrupt on hart {}",
-                    cpu::get_hartid()
+                    cpu::get_mhartid()
                 );
 
-                if let Some(next_process) = schedule() {
-                    schedule_machine_timer_interrupt(next_process.quantum);
-                    process::switch_to_user(&next_process);
-                }
+                assert!(
+                    process::get_running_process_pid() == process::IDLE_ID,
+                    "found pid : {}",
+                    process::get_running_process_pid()
+                );
+
+                process::yield_idle_process();
+                scheduler::schedule();
             }
             7 => {
-                // crate::get_print_lock().unlock();
                 debug!(
-                    "Handling async timer interrupt: mcause {}, pid {}",
-                    cause, process.pid
+                    "Handling async timer interrupt: mtime {}, mcause {}, pid {}",
+                    get_mtime(),
+                    cause,
+                    process::get_running_process_pid()
                 );
-                unsafe {
-                    if process.pid != core::usize::MAX {
-                        let mut old_process =
-                            process::PROCESS_RUNNING[cpu::get_hartid()].take().unwrap();
-                        old_process.state = process::ProcessState::Ready;
-                        process::process_list_add(old_process);
+                let has_awaken = process::try_wake_sleeping();
+
+                if process::get_running_process_pid() == process::IDLE_ID {
+                    if has_awaken {
+                        process::yield_idle_process();
+                        scheduler::schedule();
                     }
-                    if let Some(next_process) = schedule() {
-                        debug!(
-                            "interrupt process {}, pc={:x}",
-                            next_process.pid, next_process.context.pc
-                        );
-                        schedule_machine_timer_interrupt(next_process.quantum);
-                        process::switch_to_user(&next_process);
-                    } else {
-                        panic!("Next process not found!");
-                    }
+                    schedule_machine_timer_interrupt(1);
+                    process::switch_to_process(trap_frame);
+                } else {
+                    process::yield_running_process();
+                    scheduler::schedule();
                 }
             }
             11 => unsafe {
                 debug!("Handling external interrupt!");
 
                 let buffer: &mut alloc::string::String =
-                    core::mem::transmute(process.context.regs[GeneralPurposeRegister::A1 as usize]);
+                    core::mem::transmute((*trap_frame).regs[GeneralPurposeRegister::A1 as usize]);
 
                 if let Some(external_interrupt) = plic::next() {
                     match external_interrupt {
@@ -136,7 +183,7 @@ pub fn tong_os_trap(process: &mut Process) {
                                         print!("{0} {0}", 8 as char);
                                         buffer.pop();
                                         plic::complete(external_interrupt);
-                                        process::switch_to_user(process);
+                                        process::switch_to_process(trap_frame);
                                     }
                                     // Enter
                                     10 | 13 => {
@@ -147,8 +194,8 @@ pub fn tong_os_trap(process: &mut Process) {
                                         let flags = 1 << 7;
                                         asm!("csrw mie, {}", in(reg) flags);
 
-                                        schedule_machine_timer_interrupt(process.quantum);
-                                        process::switch_to_user(process);
+                                        schedule_machine_timer_interrupt(1);
+                                        process::switch_to_process(trap_frame);
                                     }
                                     // Char
                                     _ => {
@@ -156,7 +203,7 @@ pub fn tong_os_trap(process: &mut Process) {
                                         buffer.push(c as char);
 
                                         plic::complete(external_interrupt);
-                                        process::switch_to_user(process);
+                                        process::switch_to_process(trap_frame);
                                     }
                                 }
                             }
@@ -171,7 +218,7 @@ pub fn tong_os_trap(process: &mut Process) {
             _ => {
                 panic!(
                     "Unhandled async trap CPU#{} -> {}\n",
-                    cpu::get_hartid(),
+                    cpu::get_mhartid(),
                     cause
                 );
             }
@@ -179,133 +226,159 @@ pub fn tong_os_trap(process: &mut Process) {
     } else {
         match cause {
             8 => {
-                let which_code = process.context.regs[GeneralPurposeRegister::A0 as usize];
+                let which_code = unsafe { (*trap_frame).regs[GeneralPurposeRegister::A0 as usize] };
 
                 debug!(
                     "Handling user ecall exception: mcause {}, pid {}, syscall code {}",
-                    cause, process.pid, which_code,
+                    cause,
+                    process::get_running_process_pid(),
+                    which_code,
                 );
 
                 match which_code {
                     // Exiting process
                     0 => {
+                        debug!("handling exit");
                         // Check if child process needs to reschedule parent
-                        if let Some(blocked_pid) = process.blocking_pid {
-                            process::wake_process(blocked_pid);
+                        if let Some(blocked) = process::get_running_process_blocking_pid() {
+                            debug!("waking blocked: {}", blocked);
+                            process::unblock_process_by_pid(blocked);
+                            // wake_all_idle_harts();
                         }
-                        process::pid_list_remove(process.pid);
-
-                        if let Some(next_process) = schedule() {
-                            debug!(
-                                "interrupt process {}, pc={:x}",
-                                next_process.pid, next_process.context.pc
-                            );
-                            schedule_machine_timer_interrupt(next_process.quantum);
-                            process::switch_to_user(&next_process);
-                        } else {
-                            panic!("Next process not found!");
-                        }
+                        process::delete_running_process();
+                        scheduler::schedule();
                     }
                     // Create thread
                     1 => {
+                        debug!("handling create thread");
                         let process_address =
-                            process.context.regs[GeneralPurposeRegister::A1 as usize];
-                        let process_arg = process.context.regs[GeneralPurposeRegister::A2 as usize];
-                        let new_process = process::Process::new(process_address, process_arg);
+                            unsafe { (*trap_frame).regs[GeneralPurposeRegister::A1 as usize] };
+                        let process_arg0 =
+                            unsafe { (*trap_frame).regs[GeneralPurposeRegister::A2 as usize] };
+                        let process_arg1 =
+                            unsafe { (*trap_frame).regs[GeneralPurposeRegister::A3 as usize] };
+                        let process_arg2 =
+                            unsafe { (*trap_frame).regs[GeneralPurposeRegister::A4 as usize] };
+                        let new_process = process::Process::new(
+                            process_address,
+                            process_arg0,
+                            process_arg1,
+                            process_arg2,
+                        );
                         let new_process_pid = new_process.pid;
                         process::process_list_add(new_process);
-                        process.context.regs[GeneralPurposeRegister::A0 as usize] = new_process_pid;
-                        process.context.pc += 4;
-                        process::switch_to_user(process);
+                        unsafe {
+                            (*trap_frame).regs[GeneralPurposeRegister::A0 as usize] =
+                                new_process_pid;
+                            (*trap_frame).pc += 4;
+                        }
+                        // wake_all_idle_harts();
+                        process::switch_to_process(trap_frame);
                     }
                     // Joining thread
                     2 => {
-                        let joining_pid = process.context.regs[GeneralPurposeRegister::A1 as usize];
+                        debug!("handling join");
+                        let joining_pid =
+                            unsafe { (*trap_frame).regs[GeneralPurposeRegister::A1 as usize] };
+                        debug!("joining pid: {}", joining_pid);
 
+                        unsafe {
+                            (*trap_frame).pc += 4;
+                        };
                         // if joining pid has already exited
-                        if !process::process_list_contains(joining_pid)
-                            && !process::pid_list_contains(joining_pid)
-                        {
-                            // add runnign to proc list as readdy and schedule
-                            let mut running = unsafe {
-                                process::PROCESS_RUNNING[cpu::get_hartid()].take().unwrap()
-                            };
-                            running.state = process::ProcessState::Ready;
-                            running.context.pc += 4;
-                            process::process_list_add(running);
-                            if let Some(next) = schedule() {
-                                schedule_machine_timer_interrupt(next.quantum);
-                                process::switch_to_user(next);
-                            } else {
-                                panic!("Joining non existent process failure");
-                            }
+                        if !process::process_list_contains(joining_pid) {
+                            debug!("not contains");
+                            process::switch_to_process(trap_frame);
                         } else {
-                            let mut running = unsafe {
-                                process::PROCESS_RUNNING[cpu::get_hartid()].take().unwrap()
-                            };
-                            running.state = process::ProcessState::Blocked;
-                            running.context.pc += 4;
-                            let blocking_pid = running.pid;
-                            process::process_list_add(running);
+                            debug!("contains");
+                            let blocking_pid = process::get_running_process_pid();
                             process::set_blocking_pid(joining_pid, blocking_pid);
-                            if let Some(next) = schedule() {
-                                schedule_machine_timer_interrupt(next.quantum);
-                                process::switch_to_user(next);
-                            } else {
-                                panic!("Joining existent process failure");
-                            }
+                            process::block_process();
+                            scheduler::schedule();
                         }
                     }
                     // syscall sleep
                     3 => {
-                        let mut running =
-                            unsafe { process::PROCESS_RUNNING[cpu::get_hartid()].take().unwrap() };
-                        let amount = running.context.regs[GeneralPurposeRegister::A1 as usize];
-                        running.sleep_until = unsafe {
-                            MMIO_MTIME.read_volatile() as usize
-                                + amount * cpu::CONTEXT_SWITCH_TIME as usize
+                        debug!("handling sleep");
+                        unsafe {
+                            (*trap_frame).pc += 4;
                         };
-                        running.state = process::ProcessState::Sleeping;
-                        running.context.pc += 4;
+                        let amount =
+                            unsafe { (*trap_frame).regs[GeneralPurposeRegister::A1 as usize] };
+                        let until =
+                            get_mtime() as usize + amount * cpu::CONTEXT_SWITCH_TIME as usize;
 
                         if crate::ENABLE_PREEMPTION {
-                            process::process_list_add(running);
-
-                            if let Some(next) = schedule() {
-                                schedule_machine_timer_interrupt(next.quantum);
-                                process::switch_to_user(next);
-                            } else {
-                                panic!("Sleeping process could not re-schedule");
-                            }
+                            process::put_process_to_sleep(until);
+                            scheduler::schedule();
                         } else {
-                            unsafe {
-                                while (MMIO_MTIME.read_volatile() as usize) < running.sleep_until {}
-                                running.state = process::ProcessState::Running;
-                                process::PROCESS_RUNNING[cpu::get_hartid()].replace(running);
-                                process::switch_to_user(
-                                    process::PROCESS_RUNNING[cpu::get_hartid()]
-                                        .as_ref()
-                                        .unwrap(),
-                                );
+                            // sleep
+                            loop {
+                                if (get_mtime() as usize) >= until {
+                                    break;
+                                }
                             }
+                            schedule_machine_timer_interrupt(1);
+                            process::switch_to_process(trap_frame);
                         }
                     }
                     // syscall input keyboard
                     4 => {
+                        debug!("handling input keyboard");
                         unsafe {
                             uart::READING = true;
-                            // UART
-                            plic::set_threshold(6);
-                            plic::set_priority(10, 7);
-                            plic::enable(10);
+                        }
+                        // UART
+                        plic::set_threshold(6);
+                        plic::set_priority(10, 7);
+                        plic::enable(10);
 
+                        unsafe {
                             // [11] = MEIE (Machine External Interrupt Enable)
                             let flags = 1 << 11;
                             asm!("csrw mie, {}", in(reg) flags);
-
-                            process.context.pc += 4;
-                            process::switch_to_user(process);
                         }
+                        unsafe {
+                            (*trap_frame).pc += 4;
+                        }
+                        process::switch_to_process(trap_frame);
+                    }
+                    // syscall print str
+                    5 => {
+                        debug!("handling print str");
+                        unsafe {
+                            (*trap_frame).pc += 4;
+                        }
+                        let buffer: *const u8 = unsafe {
+                            core::mem::transmute(
+                                (*trap_frame).regs[GeneralPurposeRegister::A1 as usize],
+                            )
+                        };
+
+                        let len: usize = unsafe {
+                            core::mem::transmute(
+                                (*trap_frame).regs[GeneralPurposeRegister::A2 as usize],
+                            )
+                        };
+
+                        let slice = unsafe {
+                            let slice = core::slice::from_raw_parts(buffer, len);
+                            core::str::from_utf8_unchecked(slice)
+                        };
+
+                        println!("hart {}: pid {}: {}", cpu::get_mhartid(), process::get_running_process_pid(), slice);
+                        process::switch_to_process(trap_frame);
+                    }
+                    // get time
+                    6 => {
+                        debug!("handling print str");
+                        unsafe {
+                            (*trap_frame).regs[GeneralPurposeRegister::A0 as usize] =
+                                get_mtime() as usize;
+                            (*trap_frame).pc += 4;
+                        }
+
+                        process::switch_to_process(trap_frame);
                     }
                     code => {
                         panic!("Unhandled user ecall with code {}", code);
@@ -319,7 +392,7 @@ pub fn tong_os_trap(process: &mut Process) {
                 }
                 panic!(
                     "Unhandled sync trap CPU#{} -> cause: {}; mval: {:x?}\n",
-                    cpu::get_hartid(),
+                    cpu::get_mhartid(),
                     cause,
                     mtval
                 );

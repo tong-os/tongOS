@@ -1,4 +1,6 @@
 use crate::assembly::*;
+use crate::process;
+use alloc::format;
 
 pub fn test_bss() {
     print!("Checking BSS ...  ");
@@ -41,55 +43,62 @@ pub fn print_sections() {
     }
 }
 
-use crate::process;
-
 pub fn example_process1(test: usize) -> () {
-    println!("Example process 1");
-    println!("YEAH, we're running as user with virtual address translation!");
+    process::print_str("Example process 1");
+    process::print_str("YEAH, we're running as user with virtual address translation!");
 
-    println!("Arg: {}", test);
+    // some_math(100);
 
-    println!("exiting process");
+    process::print_str(&format!("Arg: {}", test));
+
+    process::print_str("exiting process");
     process::exit();
 }
 
 pub fn example_process2() -> () {
-    println!("EXAMPLE 2, ARE YOU READY??");
+    process::print_str("EXAMPLE 2, ARE YOU READY??");
 
-    println!("exiting process");
+    // some_math(100);
+
+    process::print_str("exiting process");
     process::exit();
 }
 
 pub fn example_process3(iteration: usize) {
-    println!("Example process 3!");
+    process::print_str("Example process 3!");
 
-    println!("Counting for {}", iteration);
+    // some_math(100);
+
+    process::print_str(&format!("Counting for {}", iteration));
     let mut my_counter = 0;
     for _ in 0..iteration {
         my_counter += 1;
     }
-    println!("Ex3 counter = {}. Expected = {}", my_counter, iteration);
+    process::print_str(&format!(
+        "Ex3 counter = {}. Expected = {}",
+        my_counter, iteration
+    ));
     process::exit();
 }
 
 pub fn choose_processes(process_to_run: usize) {
     match process_to_run {
         1 => {
-            let process = process::Process::new(example_process1 as usize, 666);
+            let process = process::Process::new(example_process1 as usize, 666, 0, 0);
             process::process_list_add(process);
-            let process = process::Process::new(example_process2 as usize, 0);
+            let process = process::Process::new(example_process2 as usize, 0, 0, 0);
             process::process_list_add(process);
-            let process = process::Process::new(example_process3 as usize, 666);
+            let process = process::Process::new(example_process3 as usize, 666, 0, 0);
             process::process_list_add(process);
-            let process = process::Process::new(example_process3 as usize, 42);
+            let process = process::Process::new(example_process3 as usize, 42, 0, 0);
             process::process_list_add(process);
         }
         2 => {
-            let process = process::Process::new(crate::app::philosopher::main as usize, 0);
+            let process = process::Process::new(crate::app::philosopher::main as usize, 0, 0, 0);
             process::process_list_add(process);
         }
         3 => {
-            let process = process::Process::new(crate::app::input_example::main as usize, 0);
+            let process = process::Process::new(crate::app::input_example::main as usize, 0, 0, 0);
             process::process_list_add(process);
         }
         4 => {
