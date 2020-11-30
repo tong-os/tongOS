@@ -19,6 +19,9 @@ static mut PROCESS_RUNNING: [Option<Process>; 4] = [None, None, None, None];
 static mut PROCESS_IDLE: [Option<Process>; 4] = [None, None, None, None];
 static mut PROCESS_LIST_LOCK: [Mutex; 4] = [Mutex::new(); 4];
 
+static mut PID_LIST: Option<VecDeque<usize>> = None;
+static mut PID_LIST_LOCK: Mutex = Mutex::new();
+
 pub fn running_process() -> &'static Process {
     unsafe { PROCESS_RUNNING[cpu::get_mhartid()].as_ref().unwrap() }
 }
@@ -79,6 +82,18 @@ pub fn get_process_list_lock() -> &'static mut Mutex {
     unsafe { &mut PROCESS_LIST_LOCK[cpu::get_mhartid()] }
 }
 
+fn pid_list() -> &'static VecDeque<usize> {
+    unsafe { PID_LIST.as_ref().unwrap() }
+}
+
+fn pid_list_mut() -> &'static mut VecDeque<usize> {
+    unsafe { PID_LIST.as_mut().unwrap() }
+}
+
+pub fn get_pid_list_lock() -> &'static mut Mutex {
+    unsafe { &mut PID_LIST_LOCK }
+}
+
 static DEFAULT_QUANTUM: usize = 1;
 
 static mut NEXT_PID: usize = 0;
@@ -111,6 +126,9 @@ pub fn init() {
         for list in PROCESS_BLOCKED.as_mut().iter_mut() {
             list.replace(VecDeque::new());
         }
+    }
+    unsafe {
+        PID_LIST.replace(VecDeque::new());
     }
     for process in unsafe { &mut PROCESS_IDLE } {
         process.replace(Process::new_idle());
@@ -409,10 +427,13 @@ pub fn unblock_process_by_pid(blocked_pid: usize) {
 
 pub fn process_list_add(process: Process) {
     get_process_list_lock().spin_lock();
+    get_pid_list_lock().spin_lock();
     debug!("process list add pid {}", process.pid);
 
+    pid_list_mut().push_back(process.pid);
     ready_list_mut().push_back(process);
 
+    get_pid_list_lock().unlock();
     get_process_list_lock().unlock();
 }
 
@@ -446,6 +467,19 @@ pub fn process_list_contains(pid: usize) -> bool {
     }
 
     get_process_list_lock().unlock();
+    false
+}
+
+pub fn pid_list_contains(pid: usize) -> bool {
+    get_pid_list_lock().spin_lock();
+
+
+    if let Some(_pid) = pid_list().iter().find(|pid_element| **pid_element == pid) {
+        get_pid_list_lock().unlock();
+        return true;
+    }
+
+    get_pid_list_lock().unlock();
     false
 }
 
@@ -524,7 +558,17 @@ pub fn get_running_process_blocking_pid() -> Option<usize> {
 pub fn delete_running_process() {
     get_process_list_lock().spin_lock();
 
-    drop(running_process_take());
+    let old_running = running_process_take();
+    let pid_list = pid_list_mut();
+
+    pid_list.remove(
+        pid_list
+            .iter()
+            .position(|pid| pid == &old_running.pid)
+            .unwrap(),
+    );
+
+    drop(old_running);
 
     get_process_list_lock().unlock();
 }

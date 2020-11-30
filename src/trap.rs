@@ -286,7 +286,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                             (*trap_frame).pc += 4;
                         };
                         // if joining pid has already exited
-                        if !process::process_list_contains(joining_pid) {
+                        if !process::pid_list_contains(joining_pid) {
                             debug!("not contains");
                             process::switch_to_process(trap_frame);
                         } else {
