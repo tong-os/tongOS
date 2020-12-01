@@ -7,6 +7,8 @@ use crate::assembly;
 use crate::cpu::{self, CpuMode, TrapFrame};
 use crate::lock::Mutex;
 use crate::page::{self, PageTableEntryFlags, Sv39PageTable};
+use crate::scheduler;
+use crate::trap;
 
 use alloc::collections::vec_deque::VecDeque;
 
@@ -62,12 +64,28 @@ pub fn ready_list_mut() -> &'static mut VecDeque<Process> {
     unsafe { PROCESS_READY[cpu::get_mhartid()].as_mut().unwrap() }
 }
 
+fn ready_list_by_hartid(hartid: usize) -> &'static VecDeque<Process> {
+    unsafe { PROCESS_READY[hartid].as_ref().unwrap() }
+}
+
+pub fn ready_list_by_hartid_mut(hartid: usize) -> &'static mut VecDeque<Process> {
+    unsafe { PROCESS_READY[hartid].as_mut().unwrap() }
+}
+
 fn blocked_list() -> &'static VecDeque<Process> {
     unsafe { PROCESS_BLOCKED[cpu::get_mhartid()].as_ref().unwrap() }
 }
 
 fn blocked_list_mut() -> &'static mut VecDeque<Process> {
     unsafe { PROCESS_BLOCKED[cpu::get_mhartid()].as_mut().unwrap() }
+}
+
+fn blocked_list_by_hartid(hartid: usize) -> &'static VecDeque<Process> {
+    unsafe { PROCESS_BLOCKED[hartid].as_ref().unwrap() }
+}
+
+fn blocked_list_by_hartid_mut(hartid: usize) -> &'static mut VecDeque<Process> {
+    unsafe { PROCESS_BLOCKED[hartid].as_mut().unwrap() }
 }
 
 fn sleeping_list() -> &'static VecDeque<Process> {
@@ -78,8 +96,20 @@ fn sleeping_list_mut() -> &'static mut VecDeque<Process> {
     unsafe { PROCESS_SLEEPING[cpu::get_mhartid()].as_mut().unwrap() }
 }
 
+fn sleeping_list_by_hartid(hartid: usize) -> &'static VecDeque<Process> {
+    unsafe { PROCESS_SLEEPING[hartid].as_ref().unwrap() }
+}
+
+fn sleeping_list_by_hartid_mut(hartid: usize) -> &'static mut VecDeque<Process> {
+    unsafe { PROCESS_SLEEPING[hartid].as_mut().unwrap() }
+}
+
 pub fn get_process_list_lock() -> &'static mut Mutex {
     unsafe { &mut PROCESS_LIST_LOCK[cpu::get_mhartid()] }
+}
+
+pub fn get_process_list_lock_by_hartid(hartid: usize) -> &'static mut Mutex {
+    unsafe { &mut PROCESS_LIST_LOCK[hartid] }
 }
 
 fn pid_list() -> &'static VecDeque<usize> {
@@ -358,31 +388,47 @@ pub fn time_now() -> usize {
 }
 
 pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
-    get_process_list_lock().spin_lock();
-
-    if let Some(process) = running_list_mut().iter_mut().find(|op| {
-        if let Some(process) = op {
-            process.pid == pid
-        } else {
-            false
+    for hartid in 0..4 {
+        get_process_list_lock_by_hartid(hartid).spin_lock();
+    }
+    for hartid in 0..4 {
+        if let Some(process) = running_list_mut()[hartid].as_mut() {
+            if process.pid == pid {
+                process.blocking_pid = Some(blocking_pid);
+                break;
+            }
         }
-    }) {
-        process.as_mut().unwrap().blocking_pid = Some(blocking_pid);
-    }
 
-    if let Some(process) = sleeping_list_mut().iter_mut().find(|p| p.pid == pid) {
-        process.blocking_pid = Some(blocking_pid);
-    }
+        if let Some(process) = sleeping_list_by_hartid_mut(hartid)
+            .iter_mut()
+            .find(|p| p.pid == pid)
+        {
+            process.blocking_pid = Some(blocking_pid);
 
-    if let Some(process) = blocked_list_mut().iter_mut().find(|p| p.pid == pid) {
-        process.blocking_pid = Some(blocking_pid);
-    }
+            break;
+        }
 
-    if let Some(process) = ready_list_mut().iter_mut().find(|p| p.pid == pid) {
-        process.blocking_pid = Some(blocking_pid);
-    }
+        if let Some(process) = blocked_list_by_hartid_mut(hartid)
+            .iter_mut()
+            .find(|p| p.pid == pid)
+        {
+            process.blocking_pid = Some(blocking_pid);
 
-    get_process_list_lock().unlock();
+            break;
+        }
+
+        if let Some(process) = ready_list_by_hartid_mut(hartid)
+            .iter_mut()
+            .find(|p| p.pid == pid)
+        {
+            process.blocking_pid = Some(blocking_pid);
+
+            break;
+        }
+    }
+    for hartid in 0..4 {
+        get_process_list_lock_by_hartid(hartid).unlock();
+    }
 }
 
 pub fn try_wake_sleeping() -> bool {
@@ -407,22 +453,61 @@ pub fn try_wake_sleeping() -> bool {
         woken.state = ProcessState::Ready;
         debug!("woken pid {}", woken.pid);
         ready_list_mut().push_back(woken);
+        // migrate_process(woken);
     }
 
     get_process_list_lock().unlock();
     woken
 }
 
-pub fn unblock_process_by_pid(blocked_pid: usize) {
-    get_process_list_lock().spin_lock();
-
-    if let Some(pos) = blocked_list().iter().position(|p| p.pid == blocked_pid) {
-        let mut woken = blocked_list_mut().remove(pos).unwrap();
-        woken.state = ProcessState::Ready;
-        ready_list_mut().push_back(woken);
+pub fn migrate_process(process: Process, should_lock: bool) {
+    let next_hart = scheduler::migration_criteria();
+    if next_hart != cpu::get_mhartid() && should_lock {
+        get_process_list_lock_by_hartid(next_hart).spin_lock();
     }
+    // println!("migrating pid {} to hart {}", process.pid, next_hart);
+    ready_list_by_hartid_mut(next_hart).push_back(process);
 
-    get_process_list_lock().unlock();
+    if next_hart != cpu::get_mhartid() && should_lock {
+        trap::send_software_interrupt(next_hart);
+        get_process_list_lock_by_hartid(next_hart).unlock();
+    }
+}
+
+pub fn unblock_process_by_pid(blocked_pid: usize) {
+    println!("blocked pid : {}", blocked_pid);
+    for hartid in 0..4 {
+        get_process_list_lock_by_hartid(hartid).spin_lock();
+    }
+    println!("lock");
+    for hartid in 0..4 {
+        println!("hartid : {}", hartid);
+        let list = blocked_list_by_hartid(hartid);
+        for proc in list {
+            print!(" pid {}", proc.pid);
+        }
+        println!();
+        if let Some(pos) = blocked_list_by_hartid(hartid)
+            .iter()
+            .position(|p| p.pid == blocked_pid)
+        {
+            println!("Achou !");
+            let mut woken = blocked_list_by_hartid_mut(hartid).remove(pos).unwrap();
+            woken.state = ProcessState::Ready;
+            // ready_list_mut().push_back(woken);
+            migrate_process(woken, false);
+            println!("next hart {}", scheduler::migration_criteria());
+            let list = ready_list_by_hartid(scheduler::migration_criteria());
+            for proc in list {
+                print!(" pid {}", proc.pid);
+            }
+            println!();
+            break;
+        }
+    }
+    for hartid in 0..4 {
+        get_process_list_lock_by_hartid(hartid).unlock();
+    }
 }
 
 pub fn process_list_add(process: Process) {
@@ -473,7 +558,6 @@ pub fn process_list_contains(pid: usize) -> bool {
 pub fn pid_list_contains(pid: usize) -> bool {
     get_pid_list_lock().spin_lock();
 
-
     if let Some(_pid) = pid_list().iter().find(|pid_element| **pid_element == pid) {
         get_pid_list_lock().unlock();
         return true;
@@ -506,7 +590,8 @@ pub fn yield_running_process() {
     let mut running = running_process_take();
     running.state = ProcessState::Ready;
 
-    ready_list_mut().push_back(running);
+    // ready_list_mut().push_back(running);
+    migrate_process(running, true);
 
     get_process_list_lock().unlock();
 }

@@ -48,7 +48,7 @@ pub fn enable_machine_software_interrupt() {
     unsafe { asm!("csrw mie, {}", in(reg) flags | flags_mask) }
 }
 
-fn send_software_interrupt(hartid: usize) {
+pub fn send_software_interrupt(hartid: usize) {
     let clint_base = 0x200_0000 as *mut u32;
 
     unsafe {

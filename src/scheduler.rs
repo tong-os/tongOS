@@ -7,6 +7,10 @@ use crate::cpu::{self, TrapFrame};
 use crate::process::{self, Process, ProcessState};
 use crate::trap;
 
+pub fn migration_criteria() -> usize {
+    (cpu::get_mhartid() + 1) % 4
+}
+
 pub fn schedule() -> ! {
     process::get_process_list_lock().spin_lock();
     debug!("running schedule");

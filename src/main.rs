@@ -119,8 +119,6 @@ extern "C" fn kinit(hartid: usize) -> ! {
 
         tong_os::trap::init();
 
-        tong_os::assignment::choose_processes(tong_os::PROCESS_TO_RUN);
-
         tong_os::scheduler::schedule();
     }
 }
