@@ -186,6 +186,7 @@ pub struct Process {
     pub pid: usize,
     pub blocking_pid: Option<usize>,
     pub sleep_until: usize,
+    pub previous_hart: usize,
 }
 
 impl Process {
@@ -283,6 +284,7 @@ impl Process {
             pid,
             blocking_pid: None,
             sleep_until: 0,
+            previous_hart: cpu::get_mhartid(),
         }
     }
 
@@ -316,6 +318,7 @@ impl Process {
             pid: IDLE_ID,
             blocking_pid: None,
             sleep_until: 0,
+            previous_hart: cpu::get_mhartid(),
         }
     }
 
@@ -388,6 +391,17 @@ pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
     get_pid_list_lock().unlock();
 }
 
+fn migrate_process(mut process: Process) {
+    process.previous_hart = cpu::get_mhartid();
+    let next_hart = scheduler::migration_criteria();
+    get_ready_list_lock_by_hartid(next_hart).spin_lock();
+
+    ready_list_by_hartid_mut(next_hart).push_back(process);
+    trap::send_software_interrupt(next_hart);
+
+    get_ready_list_lock_by_hartid(next_hart).unlock();
+}
+
 pub fn try_wake_sleeping() -> bool {
     let mut woken = false;
     get_sleeping_list_lock().spin_lock();
@@ -407,18 +421,10 @@ pub fn try_wake_sleeping() -> bool {
     }) {
         woken = true;
 
-        let next_hart = scheduler::migration_criteria();
-        get_ready_list_lock_by_hartid(next_hart).spin_lock();
-
         let mut woken = sleeping_list_mut().swap_remove_back(pos).unwrap();
         woken.state = ProcessState::Ready;
-
         debug!("woken pid {}", woken.pid);
-
-        ready_list_by_hartid_mut(next_hart).push_back(woken);
-        trap::send_software_interrupt(next_hart);
-
-        get_ready_list_lock_by_hartid(next_hart).unlock();
+        migrate_process(woken);
     }
 
     get_sleeping_list_lock().unlock();
@@ -428,16 +434,9 @@ pub fn try_wake_sleeping() -> bool {
 pub fn unblock_process_by_pid(blocked_pid: usize) {
     get_blocked_list_lock().spin_lock();
     if let Some(pos) = blocked_list().iter().position(|p| p.pid == blocked_pid) {
-        let next_hart = scheduler::migration_criteria();
-        get_ready_list_lock_by_hartid(next_hart).spin_lock();
-
         let mut woken = blocked_list_mut().remove(pos).unwrap();
         woken.state = ProcessState::Ready;
-
-        ready_list_by_hartid_mut(next_hart).push_back(woken);
-        trap::send_software_interrupt(next_hart);
-
-        get_ready_list_lock_by_hartid(next_hart).unlock();
+        migrate_process(woken);
     }
     get_blocked_list_lock().unlock();
 }
@@ -484,13 +483,7 @@ pub fn yield_running_process() {
     let mut running = running_process_take();
     running.state = ProcessState::Ready;
 
-    let next_hart = scheduler::migration_criteria();
-    get_ready_list_lock_by_hartid(next_hart).spin_lock();
-
-    ready_list_by_hartid_mut(next_hart).push_back(running);
-    trap::send_software_interrupt(next_hart);
-
-    get_ready_list_lock_by_hartid(next_hart).unlock();
+    migrate_process(running);
 }
 
 pub fn block_process() {

@@ -143,11 +143,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                     process::get_running_process_pid()
                 );
 
-                let has_awaken = if cpu::get_mhartid() == 0 {
-                    process::try_wake_sleeping()
-                } else {
-                    false
-                };
+                let has_awaken = process::try_wake_sleeping();
 
                 if process::get_running_process_pid() == process::IDLE_ID {
                     if has_awaken {
@@ -375,8 +371,12 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         };
 
                         println!(
-                            "hart {}: pid {}: {}",
+                            "| current hart: {}, previous hart: {}, pid: {} | {}",
                             cpu::get_mhartid(),
+                            process::running_list()[cpu::get_mhartid()]
+                                .as_ref()
+                                .unwrap()
+                                .previous_hart,
                             process::get_running_process_pid(),
                             slice
                         );
