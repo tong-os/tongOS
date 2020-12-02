@@ -5,7 +5,7 @@ Projeto final para a disciplina INE5424 - Sistemas Operacionais II. **tongOS** �
 Principal referência de implementação: Stephen Marz¹.
 
 ## Versão
-0.4
+0.5
 
 
 ## Instalação
@@ -29,8 +29,9 @@ Para pontos de entrega e como visualizar, veja __entrega__ e __visualização__.
 
 ## Entrega
 Para a segunda entrega do projeto, é necessário cobrir os seguintes tópicos:
-1. Corretude do Sistema Operacional na execução com processador multicore
-2. Corretude na execução da política de escalonamento particionado: "Threads criadas em uma partição sejam sempre alocadas ao mesmo core".
+1. Corretude na execução da política de escalonamento particionado.
+2. Corretude na migração de threads.
+3. Corretude na política de migração implementada.
 
 ## Visualização
 Os testes para a segunda entrega estão apresentados no arquivo `assigment.rs`, chamados pela função `kinit()` em `main.rs`.
@@ -46,13 +47,15 @@ Com `PROCESS_TO_RUN` você pode escolher qual processo/app executar. As opções
 ## Pontos importantes para a entrega
 A execução com 4 harts está **hardcoded**, por algumas razões. É possível verificar que o `qemu` chama `-smp 4` em `.cargo/config`. 
 
-A inicialização das outras harts já era feito anteriormente no processo de `boot`. Essa parte está em `entry.S`. Adicionalmente, adicionamos, na função `kinit()` em `main.rs`, a "finalização" do setup das outras harts. Todas as harts, com exceção da 0, esperam até que a **hart 0** termine a inicialização do sistema e acorde-as, através da variável `MAY_BOOT`, permitindo que escalonem algum processo. Para não atrapalhar o funcionamento de outras harts, não são executadas interrupções entre harts no momento, mesmo que tenhamos o suporte para tal (`wake_all_idle_harts`, comentada por hora).
+A inicialização das outras harts já era feito anteriormente no processo de `boot`. Essa parte está em `entry.S`. Adicionalmente, adicionamos, na função `kinit()` em `main.rs`, a "finalização" do setup das outras harts. Todas as harts, com exceção da 0, esperam até que a **hart 0** termine a inicialização do sistema e acorde-as, através da variável `MAY_BOOT`, permitindo que escalonem algum processo. 
 
-Adaptamos o sistema para mostar, ao printar, a hart corrente e o pid do processo que está realizando essa saída.
+Adaptamos o sistema para mostar, ao printar, a hart corrente, a hart anterior e o pid do processo que está realizando essa saída.
 
-Para esta entrega, decidimos executar o mesmo processo em todas as harts, mas de forma independente. Desse modo, cada hart possui suas próprias filas: `ready, blocked e sleeping`. Além disso, contamos com 4 espaços reservados para processos `running` e `idle`, de suas respectivas harts.
+Assim como na entrega 4, cada hart possui sua fila de processos. A migração de processos entre harts é realizada sempre que um processo transite de um estado qualquer (`running, blocked, sleeping`) para `ready`. Esse procedimento é realizado na função `migrate_process`, localizada em `process.rs`. Nela, é invocada uma função que decide para qual hart o processo será migrado: `migration_criteria`, localizada em `scheduler.rs`.
 
-Cada hart possui `locks` respectivos para suas próprias filas e listas. Desse modo, ao interagir, apenas  as que estiverem em seu comando serão bloqueadas e manipuladas. É possível visualizar este funcionamento atráves do Jantar dos Filósofos, verificando que os pids são propriedade apenas de uma hart específica.
+Foram implementadas três políticas de migração bem simples: adição via mod, Round Robin e "disponibilidade". É importante ressaltar que a API para adicionar um novo critério é bem simples, bastando apenas criar uma função e adicioná-la na lista de critérios disponíveis, selecionados pela variável `CRITERIA`, localizada em `scheduler.rs`. Para a primeira, apenas adicionamos 1 no valor da hart corrente e realizamos a operação de % 4, para que fique no intervalo adequado. Para a segunda, existe uma variável chamada `NEXT_HART`, compartilhada por todas as harts, que é adicionada de um sempre que chamada, fazendo % 4 no final. Para a terceira, primeiro olha-se se alguma hart está executando `IDLE`, senão busca a hart com a menor fila `ready`. 
+
+
 
 
 ## Como debugar
