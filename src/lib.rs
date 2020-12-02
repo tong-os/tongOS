@@ -16,7 +16,7 @@ extern crate alloc;
 // 4 = All processess.
 pub const PROCESS_TO_RUN: usize = 2;
 
-pub const DEBUG_OUTPUT: bool = false;
+pub static mut DEBUG_OUTPUT: bool = false;
 pub const ENABLE_PREEMPTION: bool = true;
 
 pub static mut KPRINT_LOCK: crate::lock::Mutex = crate::lock::Mutex::new();
@@ -69,12 +69,12 @@ macro_rules! debug {
         }
     }};
     ($fmt:expr) => {{
-        if $crate::DEBUG_OUTPUT {
+        if unsafe{ $crate::DEBUG_OUTPUT }{
             println!(concat!("hart {}: ", $fmt), $crate::cpu::get_mhartid())
         }
     }};
     ($fmt:expr, $($args:tt)+) => {{
-        if $crate::DEBUG_OUTPUT {
+        if unsafe{$crate::DEBUG_OUTPUT} {
             println!(concat!("hart {}: ", $fmt), $crate::cpu::get_mhartid(), $($args)+)
         }
     }};

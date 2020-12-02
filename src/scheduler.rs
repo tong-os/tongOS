@@ -4,22 +4,45 @@
 // tongOs team
 
 use crate::cpu::{self, TrapFrame};
+use crate::lock::Mutex;
 use crate::process::{self, Process, ProcessState};
 use crate::trap;
 
-pub fn migration_criteria() -> usize {
+fn next_hart_criteria() -> usize {
     (cpu::get_mhartid() + 1) % 4
 }
 
+static mut NEXT_HART: usize = 0;
+static mut NEXT_HART_MUTEX: Mutex = Mutex::new();
+
+fn round_robin_criteria() -> usize {
+    unsafe {
+        NEXT_HART_MUTEX.spin_lock();
+
+        let next_hart = {
+            let next_hart = NEXT_HART;
+            NEXT_HART = (NEXT_HART + 1) % 4;
+            next_hart
+        };
+
+        NEXT_HART_MUTEX.unlock();
+        next_hart
+    }
+}
+
+pub fn migration_criteria() -> usize {
+    round_robin_criteria()
+}
+
 pub fn schedule() -> ! {
-    process::get_process_list_lock().spin_lock();
+    process::get_ready_list_lock().spin_lock();
     debug!("running schedule");
 
     if let Some(next) = process::ready_list_mut().pop_front() {
         debug!("scheduling pid {}", next.pid);
         let (trap_frame, quantum) = prepare_running_process(next);
 
-        process::get_process_list_lock().unlock();
+        process::get_ready_list_lock().unlock();
 
         trap::disable_machine_software_interrupt();
         trap::schedule_machine_timer_interrupt(quantum);
@@ -29,9 +52,8 @@ pub fn schedule() -> ! {
         let idle = process::idle_process_take();
         let (trap_frame, quantum) = prepare_running_process(idle);
 
-        process::get_process_list_lock().unlock();
+        process::get_ready_list_lock().unlock();
 
-        trap::complete_software_interrupt(cpu::get_mhartid());
         trap::enable_machine_software_interrupt();
         trap::schedule_machine_timer_interrupt(quantum);
         process::switch_to_process(trap_frame);

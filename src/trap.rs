@@ -49,6 +49,7 @@ pub fn enable_machine_software_interrupt() {
 }
 
 pub fn send_software_interrupt(hartid: usize) {
+    debug!("sending software interrupt to hart {}", hartid);
     let clint_base = 0x200_0000 as *mut u32;
 
     unsafe {
@@ -64,18 +65,10 @@ pub fn complete_software_interrupt(hartid: usize) {
     }
 }
 
-pub fn wake_all_idle_harts() {
-    process::get_process_list_lock().spin_lock();
-    for (hartid, running) in process::running_list().iter().enumerate() {
-        process::print_process_list();
-        if let Some(running) = running {
-            if running.pid == process::IDLE_ID {
-                debug!("waking hart {}", hartid);
-                send_software_interrupt(hartid);
-            }
-        }
+pub fn wake_all_harts() {
+    for hartid in 0..4 {
+        send_software_interrupt(hartid);
     }
-    process::get_process_list_lock().unlock();
 }
 
 // CLINT Memory Map
@@ -149,7 +142,12 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                     cause,
                     process::get_running_process_pid()
                 );
-                let has_awaken = process::try_wake_sleeping();
+
+                let has_awaken = if cpu::get_mhartid() == 0 {
+                    process::try_wake_sleeping()
+                } else {
+                    false
+                };
 
                 if process::get_running_process_pid() == process::IDLE_ID {
                     if has_awaken {
@@ -277,6 +275,9 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                     }
                     // Joining thread
                     2 => {
+                        // unsafe {
+                        //     crate::DEBUG_OUTPUT = true;
+                        // }
                         debug!("handling join");
                         let joining_pid =
                             unsafe { (*trap_frame).regs[GeneralPurposeRegister::A1 as usize] };
@@ -288,11 +289,18 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         // if joining pid has already exited
                         if !process::pid_list_contains(joining_pid) {
                             debug!("not contains");
+                            unsafe {
+                                crate::DEBUG_OUTPUT = false;
+                            }
                             process::switch_to_process(trap_frame);
                         } else {
                             debug!("contains");
                             let blocking_pid = process::get_running_process_pid();
                             process::set_blocking_pid(joining_pid, blocking_pid);
+                            debug!("calling schedule()");
+                            // unsafe {
+                            //     crate::DEBUG_OUTPUT = false;
+                            // }
                             process::block_process();
                             scheduler::schedule();
                         }
@@ -366,7 +374,12 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                             core::str::from_utf8_unchecked(slice)
                         };
 
-                        println!("hart {}: pid {}: {}", cpu::get_mhartid(), process::get_running_process_pid(), slice);
+                        println!(
+                            "hart {}: pid {}: {}",
+                            cpu::get_mhartid(),
+                            process::get_running_process_pid(),
+                            slice
+                        );
                         process::switch_to_process(trap_frame);
                     }
                     // get time
