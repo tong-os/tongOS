@@ -8,6 +8,8 @@ use crate::lock::Mutex;
 use crate::process::{self, Process, ProcessState};
 use crate::trap;
 
+const CRITERIA: usize = 1; 
+
 fn next_hart_criteria() -> usize {
     (cpu::get_mhartid() + 1) % 4
 }
@@ -30,8 +32,31 @@ fn round_robin_criteria() -> usize {
     }
 }
 
+fn least_busy() -> usize {
+    let mut least = core::usize::MAX;
+    let mut least_hartid = 0;
+    for hartid in 0..4 {
+        if let Some(process) = process::running_list()[hartid].as_ref() {
+            if process.pid == process::IDLE_ID {
+                return hartid;
+            }
+        };
+        let len = process::ready_list_by_hartid_mut(hartid).len();
+        if  len < least {
+            least = len;
+            least_hartid = hartid;
+        }
+    }
+    least_hartid
+}
+
 pub fn migration_criteria() -> usize {
-    round_robin_criteria()
+    match CRITERIA {
+        0 => least_busy(),
+        1 => round_robin_criteria(),
+        2 => next_hart_criteria(),
+        _ => panic!("invalid migration criteri"),
+    }
 }
 
 pub fn schedule() -> ! {

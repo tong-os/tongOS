@@ -371,7 +371,7 @@ pub fn tong_os_trap(trap_frame: *mut TrapFrame) {
                         };
 
                         println!(
-                            "| current hart: {}, previous hart: {}, pid: {} | {}",
+                            "| c hart: {}, p hart: {}, pid: {} | {}",
                             cpu::get_mhartid(),
                             process::running_list()[cpu::get_mhartid()]
                                 .as_ref()
