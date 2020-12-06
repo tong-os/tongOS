@@ -7,17 +7,27 @@ use crate::assembly;
 use crate::cpu::{self, CpuMode, TrapFrame};
 use crate::lock::Mutex;
 use crate::page::{self, PageTableEntryFlags, Sv39PageTable};
+use crate::scheduler;
+use crate::trap;
 
 use alloc::collections::vec_deque::VecDeque;
 
 pub const IDLE_ID: usize = core::usize::MAX;
 
-static mut PROCESS_READY: [Option<VecDeque<Process>>; 4] = [None, None, None, None];
-static mut PROCESS_BLOCKED: [Option<VecDeque<Process>>; 4] = [None, None, None, None];
-static mut PROCESS_SLEEPING: [Option<VecDeque<Process>>; 4] = [None, None, None, None];
 static mut PROCESS_RUNNING: [Option<Process>; 4] = [None, None, None, None];
 static mut PROCESS_IDLE: [Option<Process>; 4] = [None, None, None, None];
-static mut PROCESS_LIST_LOCK: [Mutex; 4] = [Mutex::new(); 4];
+
+static mut PROCESS_READY: [Option<VecDeque<Process>>; 4] = [None, None, None, None];
+static mut PROCESS_READY_LOCK: [Mutex; 4] = [Mutex::new(); 4];
+
+static mut PROCESS_SLEEPING: Option<VecDeque<Process>> = None;
+static mut PROCESS_SLEEPING_LOCK: Mutex = Mutex::new();
+
+static mut PROCESS_BLOCKED: Option<VecDeque<Process>> = None;
+static mut PROCESS_BLOCKED_LOCK: Mutex = Mutex::new();
+
+static mut PID_LIST: Option<VecDeque<(usize, Option<usize>)>> = None;
+static mut PID_LIST_LOCK: Mutex = Mutex::new();
 
 pub fn running_process() -> &'static Process {
     unsafe { PROCESS_RUNNING[cpu::get_mhartid()].as_ref().unwrap() }
@@ -59,24 +69,56 @@ pub fn ready_list_mut() -> &'static mut VecDeque<Process> {
     unsafe { PROCESS_READY[cpu::get_mhartid()].as_mut().unwrap() }
 }
 
+fn ready_list_by_hartid(hartid: usize) -> &'static VecDeque<Process> {
+    unsafe { PROCESS_READY[hartid].as_ref().unwrap() }
+}
+
+pub fn ready_list_by_hartid_mut(hartid: usize) -> &'static mut VecDeque<Process> {
+    unsafe { PROCESS_READY[hartid].as_mut().unwrap() }
+}
+
 fn blocked_list() -> &'static VecDeque<Process> {
-    unsafe { PROCESS_BLOCKED[cpu::get_mhartid()].as_ref().unwrap() }
+    unsafe { PROCESS_BLOCKED.as_ref().unwrap() }
 }
 
 fn blocked_list_mut() -> &'static mut VecDeque<Process> {
-    unsafe { PROCESS_BLOCKED[cpu::get_mhartid()].as_mut().unwrap() }
+    unsafe { PROCESS_BLOCKED.as_mut().unwrap() }
+}
+
+fn get_blocked_list_lock() -> &'static mut Mutex {
+    unsafe { &mut PROCESS_BLOCKED_LOCK }
 }
 
 fn sleeping_list() -> &'static VecDeque<Process> {
-    unsafe { PROCESS_SLEEPING[cpu::get_mhartid()].as_ref().unwrap() }
+    unsafe { PROCESS_SLEEPING.as_ref().unwrap() }
 }
 
 fn sleeping_list_mut() -> &'static mut VecDeque<Process> {
-    unsafe { PROCESS_SLEEPING[cpu::get_mhartid()].as_mut().unwrap() }
+    unsafe { PROCESS_SLEEPING.as_mut().unwrap() }
 }
 
-pub fn get_process_list_lock() -> &'static mut Mutex {
-    unsafe { &mut PROCESS_LIST_LOCK[cpu::get_mhartid()] }
+fn get_sleeping_list_lock() -> &'static mut Mutex {
+    unsafe { &mut PROCESS_SLEEPING_LOCK }
+}
+
+pub fn get_ready_list_lock() -> &'static mut Mutex {
+    unsafe { &mut PROCESS_READY_LOCK[cpu::get_mhartid()] }
+}
+
+pub fn get_ready_list_lock_by_hartid(hartid: usize) -> &'static mut Mutex {
+    unsafe { &mut PROCESS_READY_LOCK[hartid] }
+}
+
+fn pid_list() -> &'static VecDeque<(usize, Option<usize>)> {
+    unsafe { PID_LIST.as_ref().unwrap() }
+}
+
+fn pid_list_mut() -> &'static mut VecDeque<(usize, Option<usize>)> {
+    unsafe { PID_LIST.as_mut().unwrap() }
+}
+
+pub fn get_pid_list_lock() -> &'static mut Mutex {
+    unsafe { &mut PID_LIST_LOCK }
 }
 
 static DEFAULT_QUANTUM: usize = 1;
@@ -103,14 +145,13 @@ pub fn init() {
         }
     }
     unsafe {
-        for list in PROCESS_SLEEPING.as_mut().iter_mut() {
-            list.replace(VecDeque::new());
-        }
+        PROCESS_SLEEPING.replace(VecDeque::new());
     }
     unsafe {
-        for list in PROCESS_BLOCKED.as_mut().iter_mut() {
-            list.replace(VecDeque::new());
-        }
+        PROCESS_BLOCKED.replace(VecDeque::new());
+    }
+    unsafe {
+        PID_LIST.replace(VecDeque::new());
     }
     for process in unsafe { &mut PROCESS_IDLE } {
         process.replace(Process::new_idle());
@@ -145,6 +186,7 @@ pub struct Process {
     pub pid: usize,
     pub blocking_pid: Option<usize>,
     pub sleep_until: usize,
+    pub previous_hart: usize,
 }
 
 impl Process {
@@ -242,6 +284,7 @@ impl Process {
             pid,
             blocking_pid: None,
             sleep_until: 0,
+            previous_hart: cpu::get_mhartid(),
         }
     }
 
@@ -266,7 +309,7 @@ impl Process {
             core::ptr::copy(source, trap_frame, 1);
         }
 
-        let proc = Process {
+        Process {
             trap_frame,
             stack: stack as *mut u8,
             state: ProcessState::Ready,
@@ -275,9 +318,8 @@ impl Process {
             pid: IDLE_ID,
             blocking_pid: None,
             sleep_until: 0,
-        };
-
-        proc
+            previous_hart: cpu::get_mhartid(),
+        }
     }
 
     pub fn get_trap_frame(&self) -> *mut TrapFrame {
@@ -340,36 +382,29 @@ pub fn time_now() -> usize {
 }
 
 pub fn set_blocking_pid(pid: usize, blocking_pid: usize) {
-    get_process_list_lock().spin_lock();
+    get_pid_list_lock().spin_lock();
 
-    if let Some(process) = running_list_mut().iter_mut().find(|op| {
-        if let Some(process) = op {
-            process.pid == pid
-        } else {
-            false
-        }
-    }) {
-        process.as_mut().unwrap().blocking_pid = Some(blocking_pid);
-    }
+    if let Some((_p, bp)) = pid_list_mut().iter_mut().find(|(p, _)| *p == pid) {
+        *bp = Some(blocking_pid);
+    };
 
-    if let Some(process) = sleeping_list_mut().iter_mut().find(|p| p.pid == pid) {
-        process.blocking_pid = Some(blocking_pid);
-    }
+    get_pid_list_lock().unlock();
+}
 
-    if let Some(process) = blocked_list_mut().iter_mut().find(|p| p.pid == pid) {
-        process.blocking_pid = Some(blocking_pid);
-    }
+fn migrate_process(mut process: Process) {
+    process.previous_hart = cpu::get_mhartid();
+    let next_hart = scheduler::migration_criteria();
+    get_ready_list_lock_by_hartid(next_hart).spin_lock();
 
-    if let Some(process) = ready_list_mut().iter_mut().find(|p| p.pid == pid) {
-        process.blocking_pid = Some(blocking_pid);
-    }
+    ready_list_by_hartid_mut(next_hart).push_back(process);
+    trap::send_software_interrupt(next_hart);
 
-    get_process_list_lock().unlock();
+    get_ready_list_lock_by_hartid(next_hart).unlock();
 }
 
 pub fn try_wake_sleeping() -> bool {
     let mut woken = false;
-    get_process_list_lock().spin_lock();
+    get_sleeping_list_lock().spin_lock();
 
     let mut iter = sleeping_list().iter();
     let current_time = crate::trap::get_mtime() as usize;
@@ -385,111 +420,85 @@ pub fn try_wake_sleeping() -> bool {
         }
     }) {
         woken = true;
+
         let mut woken = sleeping_list_mut().swap_remove_back(pos).unwrap();
         woken.state = ProcessState::Ready;
         debug!("woken pid {}", woken.pid);
-        ready_list_mut().push_back(woken);
+        migrate_process(woken);
     }
 
-    get_process_list_lock().unlock();
+    get_sleeping_list_lock().unlock();
     woken
 }
 
 pub fn unblock_process_by_pid(blocked_pid: usize) {
-    get_process_list_lock().spin_lock();
-
+    get_blocked_list_lock().spin_lock();
     if let Some(pos) = blocked_list().iter().position(|p| p.pid == blocked_pid) {
         let mut woken = blocked_list_mut().remove(pos).unwrap();
         woken.state = ProcessState::Ready;
-        ready_list_mut().push_back(woken);
+        migrate_process(woken);
     }
-
-    get_process_list_lock().unlock();
+    get_blocked_list_lock().unlock();
 }
 
 pub fn process_list_add(process: Process) {
-    get_process_list_lock().spin_lock();
+    get_pid_list_lock().spin_lock();
+    get_ready_list_lock().spin_lock();
     debug!("process list add pid {}", process.pid);
 
+    pid_list_mut().push_back((process.pid, None));
     ready_list_mut().push_back(process);
 
-    get_process_list_lock().unlock();
+    get_ready_list_lock().unlock();
+    get_pid_list_lock().unlock();
 }
 
-pub fn process_list_contains(pid: usize) -> bool {
-    get_process_list_lock().spin_lock();
+pub fn pid_list_contains(pid: usize) -> bool {
+    get_pid_list_lock().spin_lock();
 
-    if let Some(_proc) = running_list().iter().find(|op| {
-        if let Some(p) = op {
-            p.pid == pid
-        } else {
-            false
-        }
-    }) {
-        get_process_list_lock().unlock();
+    if let Some((_pid, _bp)) = pid_list()
+        .iter()
+        .find(|(pid_element, _)| *pid_element == pid)
+    {
+        get_pid_list_lock().unlock();
         return true;
     }
 
-    if let Some(_proc) = blocked_list().iter().find(|p| p.pid == pid) {
-        get_process_list_lock().unlock();
-        return true;
-    }
-
-    if let Some(_proc) = sleeping_list().iter().find(|p| p.pid == pid) {
-        get_process_list_lock().unlock();
-        return true;
-    }
-
-    if let Some(_proc) = ready_list().iter().find(|p| p.pid == pid) {
-        get_process_list_lock().unlock();
-        return true;
-    }
-
-    get_process_list_lock().unlock();
+    get_pid_list_lock().unlock();
     false
 }
 
 pub fn update_running_process_trap_frame(trap_frame: *mut TrapFrame) {
-    get_process_list_lock().spin_lock();
     running_process_mut().trap_frame = trap_frame;
-    get_process_list_lock().unlock();
 }
 
 pub fn get_running_process_pid() -> usize {
-    get_process_list_lock().spin_lock();
-
     let pid = running_process().pid;
-
-    get_process_list_lock().unlock();
 
     pid
 }
 
 // takes the running process and put in the ready list
 pub fn yield_running_process() {
-    get_process_list_lock().spin_lock();
-
     let mut running = running_process_take();
     running.state = ProcessState::Ready;
 
-    ready_list_mut().push_back(running);
-
-    get_process_list_lock().unlock();
+    migrate_process(running);
 }
 
 pub fn block_process() {
-    get_process_list_lock().spin_lock();
+    get_blocked_list_lock().spin_lock();
 
     let mut running = running_process_take();
     running.state = ProcessState::Blocked;
 
     blocked_list_mut().push_back(running);
 
-    get_process_list_lock().unlock();
+    get_blocked_list_lock().unlock();
 }
 
 pub fn put_process_to_sleep(until: usize) {
-    get_process_list_lock().spin_lock();
+    get_sleeping_list_lock().spin_lock();
 
     let mut running = running_process_take();
 
@@ -497,36 +506,47 @@ pub fn put_process_to_sleep(until: usize) {
 
     sleeping_list_mut().push_back(running);
 
-    get_process_list_lock().unlock();
+    get_sleeping_list_lock().unlock();
 }
 
 // takes the running idle and give back to idle list
 pub fn yield_idle_process() {
-    get_process_list_lock().spin_lock();
-
     let mut running = running_process_take();
     running.state = ProcessState::Ready;
 
     idle_process_replace(running);
-
-    get_process_list_lock().unlock();
 }
 
 pub fn get_running_process_blocking_pid() -> Option<usize> {
-    get_process_list_lock().spin_lock();
+    get_pid_list_lock().spin_lock();
 
-    let blocking_pid = running_process().blocking_pid;
+    let running_pid = get_running_process_pid();
 
-    get_process_list_lock().unlock();
-    blocking_pid
+    let (_, blocking_pid) = pid_list()
+        .iter()
+        .find(|(pid, _)| *pid == running_pid)
+        .unwrap();
+
+    get_pid_list_lock().unlock();
+    *blocking_pid
 }
 
 pub fn delete_running_process() {
-    get_process_list_lock().spin_lock();
+    get_pid_list_lock().spin_lock();
 
-    drop(running_process_take());
+    let old_running = running_process_take();
+    let pid_list = pid_list_mut();
 
-    get_process_list_lock().unlock();
+    pid_list.remove(
+        pid_list
+            .iter()
+            .position(|(pid, _)| pid == &old_running.pid)
+            .unwrap(),
+    );
+
+    drop(old_running);
+
+    get_pid_list_lock().unlock();
 }
 
 pub fn print_process_list() {
